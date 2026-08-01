@@ -1,0 +1,11 @@
+# Parameter overrides for the aic_insertion nodes. The tuned defaults live in
+# aic_insertion/specs.py (ControlSpec / DetectorSpec); only ROS-exposed knobs
+# appear here.
+aic_port_perception:
+  ros__parameters:
+    use_sim_time: true
+    debug_overlay: true
+
+aic_insertion:
+  ros__parameters:
+    use_sim_time: true

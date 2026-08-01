@@ -35,6 +35,14 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="exit after this many frames instead of running until closed",
     )
+    parser.add_argument(
+        "--camera-res",
+        type=int,
+        default=None,
+        help="square camera resolution override (default: the spec's 224). "
+        "224 was sized as an RL policy input; the vision insertion module "
+        "documents its accuracy at 448.",
+    )
     return parser.parse_args()
 
 
@@ -91,7 +99,11 @@ def main() -> None:
         app.update()
 
     if not args.no_ros and not args.stage:
-        builder = build_bridge(context.get_stage(), AIC_PORT_INSERTION_LAYOUT)
+        builder = build_bridge(
+            context.get_stage(),
+            AIC_PORT_INSERTION_LAYOUT,
+            camera_resolution=args.camera_res,
+        )
         print(build_report(builder))
     elif args.stage:
         # A reloaded graph fails quietly rather than loudly, so say what it did.

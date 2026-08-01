@@ -21,6 +21,8 @@ The bridge only publishes while the timeline is playing.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import omni.kit.app
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
@@ -68,10 +70,24 @@ def build_bridge(
     namespace: str = "/aic",
     lens: CameraLensSpec = AIC_CAMERA_LENS,
     goal: InsertionGoalSpec | None = AIC_NIC_PORT_0_GOAL,
+    camera_resolution: int | None = None,
 ) -> GraphBuilder:
-    """Create the bridge graph, replacing any graph already at ``graph_path``."""
+    """Create the bridge graph, replacing any graph already at ``graph_path``.
+
+    ``camera_resolution`` overrides the square render size of every camera
+    frame; the spec's 224 stays the default. Intrinsics in ``camera_info``
+    scale with the render product automatically.
+    """
 
     robot: RobotAssetSpec = layout.robot_slot.asset
+    if camera_resolution is not None:
+        robot = replace(
+            robot,
+            camera_frames=tuple(
+                replace(frame, width=camera_resolution, height=camera_resolution)
+                for frame in robot.camera_frames
+            ),
+        )
     robot_slot = slot_prim_path(layout.robot_slot, root)
     robot_root = asset_root_prim_path(stage, robot_slot, robot.usd.root_prim)
     arm = robot.joint_group(ARM_JOINT_GROUP)

@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>aic_insertion</name>
+  <version>0.1.0</version>
+  <description>
+    Vision-based SFP plug insertion for the AIC UR5e scene: classical
+    multi-view port perception plus a force-guarded insertion controller.
+    See docs/vision-insertion.md at the repo root for the design.
+  </description>
+  <maintainer email="jd220010d@student.etf.bg.ac.rs">Dobrica Jankovic</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>cv_bridge</depend>
+  <depend>python3-numpy</depend>
+  <depend>python3-opencv</depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
