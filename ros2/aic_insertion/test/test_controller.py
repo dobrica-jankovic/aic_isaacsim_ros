@@ -71,7 +71,9 @@ def test_quintic_start_is_not_a_stall():
     assert machine.retries == 0
 
 
-def test_wrench_spike_triggers_retreat():
+def test_transient_wrench_spike_is_tolerated():
+    """The cable swings tens of newtons in free space; only a sustained
+    overload is a jam."""
     machine = InsertionStateMachine(CONTROL, observe_pose=OBSERVE)
     tip = (np.array([0.227, -0.173, 0.273]), QUAT)
     t = 0.0
@@ -80,8 +82,24 @@ def test_wrench_spike_triggers_retreat():
         if target is not None:
             tip = target
         t += 0.05
-    tip, t = _drive(machine, tip, seconds=0.2, wrench=50.0, t0=t)
-    assert machine.state == "RETREAT"
+    spike = CONTROL.contact_force_n + 10.0
+    tip, t = _drive(machine, tip, seconds=CONTROL.contact_persist_s * 0.5,
+                    wrench=spike, t0=t)
+    assert machine.state == "INSERT"
+    assert machine.retries == 0
+
+
+def test_sustained_overload_triggers_retreat():
+    machine = InsertionStateMachine(CONTROL, observe_pose=OBSERVE)
+    tip = (np.array([0.227, -0.173, 0.273]), QUAT)
+    t = 0.0
+    while machine.state != "INSERT" and t < 200.0:
+        target = machine.update(t, tip, _goals(), 0.0, 0.0)
+        if target is not None:
+            tip = target
+        t += 0.05
+    tip, t = _drive(machine, tip, seconds=CONTROL.contact_persist_s + 0.2,
+                    wrench=CONTROL.contact_force_n + 10.0, t0=t)
     assert machine.retries == 1
 
 
@@ -111,7 +129,8 @@ def test_retreat_returns_to_the_standoff():
             tip = target
         t += 0.05
     standoff_z = machine._standoff_pose()[0][2]
-    tip, t = _drive(machine, tip, seconds=0.2, wrench=50.0, t0=t)
+    tip, t = _drive(machine, tip, seconds=CONTROL.contact_persist_s + 0.2,
+                    wrench=CONTROL.contact_force_n + 10.0, t0=t)
     assert machine.retries == 1
     while machine.state != "INSERT" and t < 400.0:
         target = machine.update(t, tip, _goals(), 0.0, 0.0)

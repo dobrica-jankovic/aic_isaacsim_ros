@@ -223,7 +223,14 @@ class ControlSpec:
     settle_before_insert_s: float = 1.5
     estimate_max_age_s: float = 1.0
     estimate_max_std_m: float = 0.0015
-    contact_force_n: float = 8.0             # deviation from tare that means "jam"
+    # Deviation from tare that means "jam". The wrist F/T carries the compliant
+    # fibre cable, whose swing alone moves the reading by up to ~32 N with the
+    # plug in free space (measured over an 18 s hold). Anything near a plastic
+    # plug's real insertion force is therefore *below this platform's noise
+    # floor*: this threshold only catches a hard crash, and jam detection
+    # proper is the stall test. Both must persist to fire.
+    contact_force_n: float = 45.0
+    contact_persist_s: float = 0.5
     stall_progress_m: float = 0.0015         # commanded travel below this proves nothing
     stall_ratio: float = 0.35                # measured/commanded travel that means "stuck"
     stall_window_s: float = 2.0              # window the comparison is made over

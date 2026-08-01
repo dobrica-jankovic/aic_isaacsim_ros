@@ -115,6 +115,7 @@ class InsertionStateMachine:
         self._refine_enter_t: float | None = None
         self._hold_start: float | None = None
         self._stall_mark: tuple = (0.0, None, None)
+        self._overload_since: float | None = None
         self.wants_tare = False
 
     # The node calls this every servo tick. ``tip`` is the MEASURED tip pose;
@@ -134,6 +135,21 @@ class InsertionStateMachine:
             self.goals = goals
         handler = getattr(self, f"_state_{self.state.lower()}")
         return handler(t, tip, wrench_dev, tracking_gap)
+
+    def _overloaded(self, t: float, wrench_dev: float) -> bool:
+        """True once the wrist load has stayed over threshold long enough.
+
+        The cable swinging off the plug moves the reading by tens of newtons
+        in free space, so a single sample over threshold means nothing; only a
+        sustained overload does.
+        """
+
+        if wrench_dev <= self.spec.contact_force_n:
+            self._overload_since = None
+            return False
+        if self._overload_since is None:
+            self._overload_since = t
+        return t - self._overload_since >= self.spec.contact_persist_s
 
     def _stalled(self, t: float, tip: tuple) -> bool:
         """True when the tip stops advancing *while the command is advancing*.
@@ -216,6 +232,7 @@ class InsertionStateMachine:
         self.wants_tare = True
         # Re-primed on the first INSERT tick, once the segment exists.
         self._stall_mark = (t, None, None)
+        self._overload_since = None
         self.segment = make_segment(
             tip, self._seat_pose(), self.spec.speed_scale_insert, self.spec, t
         )
@@ -230,7 +247,7 @@ class InsertionStateMachine:
         return self.segment.sample(t)
 
     def _state_insert(self, t, tip, wrench_dev, gap):
-        jammed = wrench_dev > self.spec.contact_force_n or self._stalled(t, tip)
+        jammed = self._overloaded(t, wrench_dev) or self._stalled(t, tip)
         if jammed and not self.segment.done(t):
             return self._begin_retreat(t, tip)
         if self.segment.done(t):
