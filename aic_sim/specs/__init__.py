@@ -49,6 +49,16 @@ from .scene import (
     SCENE_SLOT_WORKCELL,
     SceneLayoutSpec,
 )
+from .task import (
+    AIC_CAMERA_LENS,
+    AIC_DOME_LIGHT,
+    AIC_DOME_LIGHT_RANDOMIZATION,
+    AIC_NIC_PORT_0_GOAL,
+    CameraLensSpec,
+    DomeLightRandomizationSpec,
+    DomeLightSpec,
+    InsertionGoalSpec,
+)
 from .targets import (
     NIC_CARD_ASSET,
     NIC_SFP_PORT_0,
@@ -59,7 +69,11 @@ from .targets import (
 from .workcells import AIC_WORKCELL_ASSET, TASK_BOARD_ASSET, StaticAssetSpec
 
 __all__ = [
+    "AIC_CAMERA_LENS",
+    "AIC_DOME_LIGHT",
+    "AIC_DOME_LIGHT_RANDOMIZATION",
     "AIC_NIC_CARD_TARGET_SLOT",
+    "AIC_NIC_PORT_0_GOAL",
     "AIC_PORT_INSERTION_LAYOUT",
     "AIC_PORT_INSERTION_RANDOMIZATION",
     "AIC_SC_PORT_1_SLOT",
@@ -78,6 +92,10 @@ __all__ = [
     "BoardPartRandomizationSpec",
     "BodyRoleSpec",
     "CameraFrameSpec",
+    "CameraLensSpec",
+    "DomeLightRandomizationSpec",
+    "DomeLightSpec",
+    "InsertionGoalSpec",
     "JointGroupSpec",
     "LayoutRandomizationSpec",
     "NIC_CARD_ASSET",

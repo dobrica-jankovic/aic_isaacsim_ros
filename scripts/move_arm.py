@@ -7,19 +7,28 @@ smoothly instead of snapping (the drive gains are stiff: 2000/100).
     source /opt/ros/jazzy/setup.bash
     python3 scripts/move_arm.py -- -0.5 -1.2 1.0 -1.5 1.0 0.3
     python3 scripts/move_arm.py --duration 4 --home
+
+Runs on the ROS side under plain python3. It reads the joint names and the home
+pose out of ``aic_sim.specs``, which needs neither Isaac Sim nor torch.
 """
 import argparse
 import math
+import sys
 import time
+from pathlib import Path
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
-ARM = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
-       "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-HOME = [0.0, -1.57, 1.57, -1.57, -1.57, 0.0]
+from aic_sim.specs import UR5E_ARM_JOINT_GROUP  # noqa: E402
+
+ARM = list(UR5E_ARM_JOINT_GROUP.joint_names)
+
+#: The task's default arm pose, not a generic UR5e home.
+HOME = [UR5E_ARM_JOINT_GROUP.default_positions[n] for n in ARM]
 
 RATE_HZ = 50.0
 
@@ -75,7 +84,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("positions", nargs="*", type=float,
                     help="6 joint angles in radians (%s)" % ", ".join(ARM))
-    ap.add_argument("--home", action="store_true", help="go to a folded home pose")
+    ap.add_argument("--home", action="store_true",
+                    help="go to the spec default arm pose")
     ap.add_argument("--duration", type=float, default=3.0, help="ramp time, seconds")
     args = ap.parse_args()
 

@@ -1,6 +1,6 @@
 __pycache__/
 *.pyc
-# Generated stages — rebuild with scripts/build_stage.py
+# Generated stages — rebuild with: run_sim.py --save stages/aic_ros2_scene.usd
 stages/
 # Scratch handoff notes — never commit
 HANDOFF.md
