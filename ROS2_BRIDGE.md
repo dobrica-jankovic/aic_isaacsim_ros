@@ -21,6 +21,26 @@ intrinsics (`builders.py`), actuator gains stiffness=2000/damping=100
 
 ## Usage
 
+### The normal way: open the saved stage
+
+`aic_ros2_scene.usd` contains the scene **and** the whole ROS 2 graph. Launch
+Isaac Sim with ROS 2 sourced, open it, press Play — all 11 topics come up. No
+scripts, no socket.
+
+```bash
+source /opt/ros/jazzy/setup.bash     # required: the bridge uses ros_distro=system_default
+cd /home/etfrobot/isaacsim-6.0/_build/linux-x86_64/release
+DISPLAY=:1 bash isaac-sim.sh         # then File → Open → aic_ros2_scene.usd → Play
+```
+
+Verified end-to-end: kill the process, relaunch, open, Play → all 11 topics
+publish with correct names and data, and `/joint_command` drives the arm.
+
+The stage still depends on `scripts/armstate_body.py` and `scripts/wrench_body.py`
+at their absolute paths (the two ScriptNodes load them via `scriptPath`).
+
+### Rebuilding from scripts
+
 ```bash
 # 1. Start the sim (see REMOTE_SIM_SETUP.md) and wait for port 8226.
 # 2. Load the scene:
@@ -42,12 +62,10 @@ ros2 topic pub /joint_command sensor_msgs/msg/JointState \
 
 ## State & continuity (read this first if picking up the work)
 
-- **The scene and the graph are in-memory only.** `load_aic_scene.py` references
-  the assets into the live stage and `build_ros2_bridge.py` creates the graph in
-  the live stage — **nothing is saved to a `.usd`**. If the Isaac Sim process is
-  restarted, both are gone. Re-run steps 2–4 in *Usage* to rebuild (takes seconds).
-  To make it persistent instead, save the stage:
-  `omni.usd.get_context().save_as_stage("<repo>/aic_ros2_scene.usd")`.
+- **The stage is now persistent**: `aic_ros2_scene.usd` holds scene + graph and
+  reloads standalone (see *Usage*). The scripts remain the source of truth — if
+  you change `build_ros2_bridge.py`, re-run it against a live sim and re-save
+  (`omni.usd.get_context().save_stage()`) to regenerate the `.usd`.
 - **Reconnecting after a chat/session reset:** the sim is a standalone OS process
   on `127.0.0.1:8226` — no session state is needed. `nc -z 127.0.0.1 8226` to
   check it's up (see `REMOTE_SIM_SETUP.md`), then talk to it again. If the port is
@@ -70,20 +88,42 @@ moves the arm to commanded poses exactly). Not done / optional follow-ups:
   ~10 Hz because the 3 camera render products gate the shared `OnPlaybackTick`.
   For high-rate joint/clock/wrench, drive those nodes from a separate non-render
   trigger (e.g. `IsaacOnPhysicsStep`) — the cameras stay on `OnPlaybackTick`.
-- **Persist the stage to `.usd`** (see above) if you don't want to re-run scripts.
+- ~~Persist the stage to `.usd`~~ — **done**, `aic_ros2_scene.usd`.
+- **Make the stage fully self-contained**: inline the two ScriptNode bodies into
+  `inputs:script` so it no longer depends on the `.py` files by absolute path.
+- **Standalone launcher**: a `SimulationApp` script that opens the stage and
+  plays, so `./python.sh run_sim.py` works alongside GUI-open.
 - **Depth/segmentation** camera outputs (only `rgb` is published today; add more
   `ROS2CameraHelper` nodes with `type=depth`/`semantic_segmentation`).
 - **URDF + robot_state_publisher / MoveIt** on the ROS side if you want a proper
   planning stack (the `/joint_states` + `/tf` we publish are already compatible).
 
-## Files (`scripts/`)
+## Files
 
-- `load_aic_scene.py` — references robot + workcell + board + ports + target at their scene poses.
-- `build_ros2_bridge.py` — builds the whole action graph idempotently (removes and recreates `/World/aic/ROS2_Graph`).
-- `armstate_body.py` — ScriptNode body: reads the 6 arm joints for `/joint_states`.
-- `wrench_body.py` — ScriptNode body: reads the 6D `ati_tool_link` wrench for `/wrist_ft/wrench`.
+- `aic_ros2_scene.usd` — saved stage: scene + ROS 2 graph, opens standalone. Regenerated from the scripts.
+- `rviz/aic.rviz` — RViz layout with the 3 camera images + TF (Fixed Frame `World`).
+- `scripts/load_aic_scene.py` — references robot + workcell + board + ports + target at their scene poses.
+- `scripts/build_ros2_bridge.py` — builds the whole action graph idempotently (removes and recreates `/World/aic/ROS2_Graph`).
+- `scripts/armstate_body.py` — ScriptNode body: reads the 6 arm joints for `/joint_states`.
+- `scripts/wrench_body.py` — ScriptNode body: reads the 6D `ati_tool_link` wrench for `/wrist_ft/wrench`.
+- `scripts/move_arm.py` — ROS-side helper: ramps the arm to a joint target over `/joint_command`.
 
 ## Design notes / gotchas
+
+- **`og.Controller.set()` does not author USD.** It writes only the runtime
+  (Fabric) value; the stage keeps no opinion, so a saved-and-reopened graph
+  silently reverts every input to its OGN default — `topicName` becomes `/rgb`,
+  ScriptNode `scriptPath` becomes empty, and the bridge comes up wrong rather
+  than failing loudly. All input values go through the `setv()` helper in
+  `build_ros2_bridge.py`, which sets the runtime value *and* authors the USD
+  attribute. Relationships (`set_rel`) were always fine — they're plain USD.
+- **Render products must be created by the graph, not by Python.**
+  `rep.create.render_product(...)` authors into the **session layer**, which is
+  discarded on save; the reopened stage then has `ROS2CameraHelper` nodes
+  pointing at a dead render-product path. Each camera therefore has an
+  `isaacsim.core.nodes.IsaacCreateRenderProduct` node whose
+  `outputs:renderProductPath` feeds the rgb/info helpers, so the render product
+  is recreated from USD data on every Play.
 
 - **Arm-only joint_states**: the native `ROS2PublishJointState` is all-or-nothing
   and would emit all 46 DOF with duplicate cable-joint names (breaks MoveIt). We

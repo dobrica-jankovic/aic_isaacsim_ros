@@ -17,7 +17,6 @@ Topics created:
 """
 import omni.graph.core as og
 import omni.usd, omni.kit.app
-import omni.replicator.core as rep
 import carb.settings
 from pxr import Sdf, Usd, UsdGeom, UsdPhysics, Gf
 
@@ -74,27 +73,41 @@ def conn(a_node, a_attr, b_node, b_attr):
 
 def set_rel(node_name, rel, targets):
     prim = stage.GetPrimAtPath(GRAPH + "/" + node_name)
-    prim.GetRelationship(rel).SetTargets([Sdf.Path(t) for t in targets])
+    prim.CreateRelationship(rel).SetTargets([Sdf.Path(t) for t in targets])
+
+def setv(node_name, attr, value):
+    """Set an input value both at runtime and *authored into USD*.
+
+    og.Controller.set alone only writes the runtime (Fabric) value — the stage
+    keeps no opinion, so a saved-and-reopened graph silently falls back to OGN
+    defaults (e.g. topicName "/rgb"). Authoring the USD attribute is what makes
+    the stage reloadable.
+    """
+    og.Controller.set(A(node_name, attr), value)
+    a = stage.GetPrimAtPath(GRAPH + "/" + node_name).GetAttribute(attr)
+    if not a:
+        raise RuntimeError("no USD attribute %s on %s" % (attr, node_name))
+    a.Set(value)
 
 # --- base nodes ---
 node("OnTick", "omni.graph.action.OnPlaybackTick")
 node("ReadSimTime", "isaacsim.core.nodes.IsaacReadSimulationTime")
 node("PublishClock", "isaacsim.ros2.bridge.ROS2PublishClock")
-og.Controller.set(A("PublishClock", "inputs:topicName"), "/clock")
+setv("PublishClock", "inputs:topicName", "/clock")
 conn("OnTick", "outputs:tick", "PublishClock", "inputs:execIn")
 conn("ReadSimTime", "outputs:simulationTime", "PublishClock", "inputs:timeStamp")
 
 # --- /joint_states (arm-only, via script node feeding manual-mode publisher) ---
 sn = node("ReadArmState", "omni.graph.scriptnode.ScriptNode")
-og.Controller.set(A("ReadArmState", "inputs:usePath"), True)
-og.Controller.set(A("ReadArmState", "inputs:scriptPath"), ARMSTATE_BODY)
+setv("ReadArmState", "inputs:usePath", True)
+setv("ReadArmState", "inputs:scriptPath", ARMSTATE_BODY)
 for an, at in [("outputs:names", "token[]"), ("outputs:positions", "double[]"),
                ("outputs:velocities", "double[]"), ("outputs:efforts", "double[]"),
                ("outputs:dofTypes", "uchar[]")]:
     og.Controller.create_attribute(sn, an, at, OUT)
 node("PublishJointState", "isaacsim.ros2.bridge.ROS2PublishJointState")
-og.Controller.set(A("PublishJointState", "inputs:topicName"), "/joint_states")
-og.Controller.set(A("PublishJointState", "inputs:stageMetersPerUnit"), 1.0)
+setv("PublishJointState", "inputs:topicName", "/joint_states")
+setv("PublishJointState", "inputs:stageMetersPerUnit", 1.0)
 conn("OnTick", "outputs:tick", "ReadArmState", "inputs:execIn")
 conn("ReadArmState", "outputs:execOut", "PublishJointState", "inputs:execIn")
 conn("ReadSimTime", "outputs:simulationTime", "PublishJointState", "inputs:timeStamp")
@@ -105,7 +118,7 @@ for a in ["names:jointNames", "positions:jointPositions", "velocities:jointVeloc
 
 # --- /joint_command (subscribe) -> articulation controller ---
 node("SubscribeJointState", "isaacsim.ros2.bridge.ROS2SubscribeJointState")
-og.Controller.set(A("SubscribeJointState", "inputs:topicName"), "/joint_command")
+setv("SubscribeJointState", "inputs:topicName", "/joint_command")
 node("ArtController", "isaacsim.core.nodes.IsaacArticulationController")
 set_rel("ArtController", "inputs:targetPrim", [ART_ROOT])
 conn("OnTick", "outputs:tick", "SubscribeJointState", "inputs:execIn")
@@ -124,28 +137,37 @@ for name in CAMS:
     xf = UsdGeom.Xformable(cam.GetPrim())
     xf.ClearXformOpOrder()
     xf.AddOrientOp().Set(Gf.Quatf(0.0, 1.0, 0.0, 0.0))  # 180 about X: USD cam -> ROS optical
-    rp = rep.create.render_product(cam_path, CAM["res"])
-    rp_path = rp.path if hasattr(rp, "path") else str(rp)
     frame_id = f"{name}_camera_optical"
+
+    # Render product is created *by the graph*, not by a Python-side Replicator
+    # call: rep.create.render_product authors into the session layer, which is
+    # dropped on save, leaving the helpers pointing at a dead path. This node
+    # recreates it from USD data on every play, so the stage is saveable.
+    crp = f"Cam_{name}_rp"
+    node(crp, "isaacsim.core.nodes.IsaacCreateRenderProduct")
+    set_rel(crp, "inputs:cameraPrim", [cam_path])
+    setv(crp, "inputs:width", CAM["res"][0])
+    setv(crp, "inputs:height", CAM["res"][1])
+    conn("OnTick", "outputs:tick", crp, "inputs:execIn")
 
     rgb = f"Cam_{name}_rgb"
     node(rgb, "isaacsim.ros2.bridge.ROS2CameraHelper")
-    og.Controller.set(A(rgb, "inputs:renderProductPath"), rp_path)
-    og.Controller.set(A(rgb, "inputs:type"), "rgb")
-    og.Controller.set(A(rgb, "inputs:topicName"), f"/aic/{name}_camera/rgb")
-    og.Controller.set(A(rgb, "inputs:frameId"), frame_id)
-    conn("OnTick", "outputs:tick", rgb, "inputs:execIn")
+    conn(crp, "outputs:renderProductPath", rgb, "inputs:renderProductPath")
+    setv(rgb, "inputs:type", "rgb")
+    setv(rgb, "inputs:topicName", f"/aic/{name}_camera/rgb")
+    setv(rgb, "inputs:frameId", frame_id)
+    conn(crp, "outputs:execOut", rgb, "inputs:execIn")
 
     info = f"Cam_{name}_info"
     node(info, "isaacsim.ros2.bridge.ROS2CameraInfoHelper")
-    og.Controller.set(A(info, "inputs:renderProductPath"), rp_path)
-    og.Controller.set(A(info, "inputs:topicName"), f"/aic/{name}_camera/camera_info")
-    og.Controller.set(A(info, "inputs:frameId"), frame_id)
-    conn("OnTick", "outputs:tick", info, "inputs:execIn")
+    conn(crp, "outputs:renderProductPath", info, "inputs:renderProductPath")
+    setv(info, "inputs:topicName", f"/aic/{name}_camera/camera_info")
+    setv(info, "inputs:frameId", frame_id)
+    conn(crp, "outputs:execOut", info, "inputs:execIn")
 
 # --- /tf: every rigid-body link relative to World ---
 node("PublishTF", "isaacsim.ros2.bridge.ROS2PublishTransformTree")
-og.Controller.set(A("PublishTF", "inputs:topicName"), "/tf")
+setv("PublishTF", "inputs:topicName", "/tf")
 links = [p.GetPath().pathString for p in Usd.PrimRange(stage.GetPrimAtPath(ROBOT))
          if p.HasAPI(UsdPhysics.RigidBodyAPI)]
 set_rel("PublishTF", "inputs:parentPrim", ["/World"])
@@ -155,23 +177,23 @@ conn("ReadSimTime", "outputs:simulationTime", "PublishTF", "inputs:timeStamp")
 
 # --- /wrist_ft/wrench: script node -> generic WrenchStamped publisher ---
 wn = node("ReadWrench", "omni.graph.scriptnode.ScriptNode")
-og.Controller.set(A("ReadWrench", "inputs:usePath"), True)
-og.Controller.set(A("ReadWrench", "inputs:scriptPath"), WRENCH_BODY)
+setv("ReadWrench", "inputs:usePath", True)
+setv("ReadWrench", "inputs:scriptPath", WRENCH_BODY)
 for an, at in [("outputs:fx", "double"), ("outputs:fy", "double"), ("outputs:fz", "double"),
                ("outputs:tx", "double"), ("outputs:ty", "double"), ("outputs:tz", "double"),
                ("outputs:sec", "int"), ("outputs:nanosec", "uint")]:
     og.Controller.create_attribute(wn, an, at, OUT)
 node("WrenchPub", "isaacsim.ros2.bridge.ROS2Publisher")
-og.Controller.set(A("WrenchPub", "inputs:messagePackage"), "geometry_msgs")
-og.Controller.set(A("WrenchPub", "inputs:messageSubfolder"), "msg")
-og.Controller.set(A("WrenchPub", "inputs:messageName"), "WrenchStamped")
-og.Controller.set(A("WrenchPub", "inputs:topicName"), "/wrist_ft/wrench")
+setv("WrenchPub", "inputs:messagePackage", "geometry_msgs")
+setv("WrenchPub", "inputs:messageSubfolder", "msg")
+setv("WrenchPub", "inputs:messageName", "WrenchStamped")
+setv("WrenchPub", "inputs:topicName", "/wrist_ft/wrench")
 
 # tick so camera attrs settle and the WrenchStamped message fields get created
 for _ in range(30):
     app.update()
 
-og.Controller.set(A("WrenchPub", "inputs:header:frame_id"), "ati_tool_link")
+setv("WrenchPub", "inputs:header:frame_id", "ati_tool_link")
 conn("OnTick", "outputs:tick", "ReadWrench", "inputs:execIn")
 conn("ReadWrench", "outputs:execOut", "WrenchPub", "inputs:execIn")
 for src, dst in [("fx", "wrench:force:x"), ("fy", "wrench:force:y"), ("fz", "wrench:force:z"),
