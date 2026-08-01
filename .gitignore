@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 # Generated stages — rebuild with scripts/build_stage.py
 stages/
+# Scratch handoff notes — never commit
+HANDOFF.md
