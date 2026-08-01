@@ -10,12 +10,16 @@ USD assets are vendored under `assets/` via git-LFS and the layout dataclasses
 under `aic_sim/specs/`, so nothing here needs an Isaac Lab checkout or torch at
 runtime.
 
-It covers two jobs:
+It covers three jobs:
 
 1. **Sim + ROS 2** -- spawn the scene, drive the arm over `/joint_command`, read
    cameras, wrist F/T, TF, and ground-truth insertion goals.
 2. **Scene only** -- the same workcell without the robot, for randomizing asset
    poses and lighting. The assets themselves are fixed.
+3. **Vision-based insertion** -- `ros2/aic_insertion/`, a ROS 2 package that
+   locates the NIC card from the wrist cameras and inserts the plug. It reads
+   only what a real robot could measure; the `/aic/cheat/*` topics are its
+   yardstick, never its input.
 
 ## Quickstart
 
@@ -81,9 +85,15 @@ pose that a spec already carries.
 | `stages/aic_ros2_scene.usd` | saved scene + graph, opens standalone in the GUI |
 | `assets/` | vendored USD assets (git-LFS) |
 | `rviz/aic.rviz` | RViz layout |
+| `ros2/aic_insertion/` | ament package: vision-based SFP insertion. Consumes the bridge, drives `/joint_command`. See its own README to run it. |
 
 ## Docs
 
+- [ros2/aic_insertion/README.md](ros2/aic_insertion/README.md) -- how to build
+  and run the insertion module, its topics, and its measured accuracy.
+- [docs/vision-insertion.md](docs/vision-insertion.md) -- the design behind it:
+  frame analysis, the approach trade study, what the live runs changed, and
+  where it currently stops. **Read §1.2 before touching any transform.**
 - [docs/ros2-bridge.md](docs/ros2-bridge.md) -- topic map, design notes, and the
   gotchas that cost real time. **Read the design notes before touching the graph.**
 - [docs/remote-sim.md](docs/remote-sim.md) -- driving an already-running Isaac Sim

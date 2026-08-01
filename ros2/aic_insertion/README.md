@@ -16,15 +16,20 @@ the evaluation script.
 source /opt/ros/jazzy/setup.bash
 ~/isaacsim-6.0/_build/linux-x86_64/release/python.sh run_sim.py --camera-res 448
 
-# 2. Build + launch the module (own terminal).
+# 2. Build + launch the module (own terminal), from the repo root.
 source /opt/ros/jazzy/setup.bash
-cd ros2 && colcon build --symlink-install && source install/setup.bash
+(cd ros2 && colcon build --symlink-install)
+source ros2/install/setup.bash
 ros2 launch aic_insertion insertion.launch.py            # or control:=false
 
-# 3. Watch.
+# 3. Watch (own terminal, repo root, ROS 2 sourced).
 ros2 topic echo /aic/insertion/status
 python3 ros2/aic_insertion/scripts/eval_perception.py --duration 60
 ```
+
+The arm starts by ramping to the task home pose, then hovers over the card's
+prior region so the wrist cameras can see the ports — expect ~60 s of transit
+before the first descent. `/aic/insertion/status` names the current state.
 
 Debug overlays: `/aic/insertion/debug/<camera>` (accepted rectangles green,
 track prediction cyan) — add them to the RViz layout next to the raw images.
