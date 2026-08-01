@@ -215,6 +215,12 @@ class ControlSpec:
     # sag or the tip parks centimetres high; 0.06 rad was measured to cap out
     # at a 20 mm standing error.
     windup_rad: float = 0.25
+    # Tighter clamp while inserting. |q_cmd - q_meas| is what the stiff PD
+    # converts into push force, so this is the module's real force limit:
+    # 0.25 rad let the arm drive 300+ N into a zero-clearance port and punch
+    # through it. A few milliradians still clears the sag but keeps the push
+    # in the range the joint can back off from.
+    windup_rad_insert: float = 0.03
     settle_tol_m: float = 0.003              # measured error that ends a transit segment
     settle_grace_s: float = 6.0              # extra settling time before moving on anyway
     success_pos_m: float = 0.003             # upstream termination spec

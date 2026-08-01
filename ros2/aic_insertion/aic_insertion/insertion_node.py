@@ -174,10 +174,14 @@ class InsertionNode(Node):
         dq = kin.dls_step(kin.jacobian(self.q_meas), twist, self.spec.dls_lambda) * dt
         dq = np.clip(dq, -self.spec.max_joint_step, self.spec.max_joint_step)
         # Anti-windup: never let the command run far from the measurement, or a
-        # jam would integrate unbounded contact force.
-        self.q_cmd = np.clip(
-            self.q_cmd + dq, self.q_meas - self.spec.windup_rad, self.q_meas + self.spec.windup_rad
+        # jam would integrate unbounded contact force. The descent runs on a
+        # tighter clamp — that clamp *is* the force limit for the press fit.
+        windup = (
+            self.spec.windup_rad_insert
+            if self.machine.state == "INSERT"
+            else self.spec.windup_rad
         )
+        self.q_cmd = np.clip(self.q_cmd + dq, self.q_meas - windup, self.q_meas + windup)
 
     # ---------------------------------------------------------------- helpers
 
