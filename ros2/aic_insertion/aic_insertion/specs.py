@@ -206,10 +206,30 @@ class ControlSpec:
     speed_scale_approach: float = 0.6        # planner phase speed scales
     speed_scale_align: float = 0.8
     speed_scale_insert: float = 0.1
-    v_max: float = 0.10                      # m/s cap before phase scaling
-    w_max: float = 0.50                      # rad/s cap before phase scaling
+    # Speed caps before phase scaling. These are *derived*, not picked: the
+    # IsaacLab task commands pose deltas of action_scale=(0.015 m, 0.025 rad)
+    # per control period, and its period is decimation/sim_rate = 4/120 =
+    # 1/30 s (port_insertion_env_cfg.py). So the demonstrated feasible speed is
+    # 0.015/(1/30) = 0.45 m/s and 0.025/(1/30) = 0.75 rad/s. An earlier
+    # hardcoded 0.10 m/s made every phase 4.5x slower than the task was built
+    # for, which is what made runs take minutes.
+    action_scale_pos_m: float = 0.015
+    action_scale_rot_rad: float = 0.025
+    control_period_s: float = 1.0 / 30.0
+
+    @property
+    def v_max(self) -> float:
+        return self.action_scale_pos_m / self.control_period_s
+
+    @property
+    def w_max(self) -> float:
+        return self.action_scale_rot_rad / self.control_period_s
     dls_lambda: float = 0.01                 # upstream diff-IK damping
-    max_joint_step: float = 0.05             # rad per servo cycle, safety clamp
+    # Per-cycle joint step, a safety bound only. At 20 Hz, 0.05 rad/cycle caps
+    # the arm at 1 rad/s, which *was* the binding constraint once the Cartesian
+    # caps above were corrected; 0.15 rad/cycle (3 rad/s) leaves the Cartesian
+    # profile in charge while still bounding a runaway.
+    max_joint_step: float = 0.15
     # |q_cmd - q_meas| clamp (anti-windup). The stiff PD drives sag under the
     # tool load, so the command must be allowed to lead the measurement by the
     # sag or the tip parks centimetres high; 0.06 rad was measured to cap out

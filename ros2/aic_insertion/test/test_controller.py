@@ -66,7 +66,10 @@ def test_quintic_start_is_not_a_stall():
             tip = target
         t += 0.05
     assert machine.state == "INSERT"
-    tip, t = _drive(machine, tip, seconds=6.0, t0=t)
+    # Drive part-way into the segment, not past it, so this stays valid when
+    # the speed caps change: the point is that the slow ramp-in must not read
+    # as a stall, not how long the descent happens to take.
+    tip, t = _drive(machine, tip, seconds=machine.segment.duration * 0.5, t0=t)
     assert machine.state == "INSERT", "quintic ramp-in was mistaken for a stall"
     assert machine.retries == 0
 
