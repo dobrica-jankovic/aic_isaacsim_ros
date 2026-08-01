@@ -98,14 +98,21 @@ class PerceptionNode(Node):
             self._publish_overlay(name, bgr, rects, K, cam_pose, msg.header)
 
     def _camera_pose(self, msg: Image):
-        try:
-            tf = self.tf_buffer.lookup_transform(
-                WORLD_FRAME, msg.header.frame_id, rclpy.time.Time()
-            )
-        except tf2_ros.TransformException as exc:
-            self.get_logger().warn(f"TF {msg.header.frame_id}: {exc}", throttle_duration_sec=5.0)
-            return None
-        return transform_from_msg(tf.transform)
+        # Look up at the image stamp: the wrist cameras move, and latest-TF
+        # skew shifts back-projections by millimetres mid-motion. Fall back to
+        # latest only when the buffer cannot serve the stamp yet.
+        for when in (rclpy.time.Time.from_msg(msg.header.stamp), rclpy.time.Time()):
+            try:
+                tf = self.tf_buffer.lookup_transform(
+                    WORLD_FRAME, msg.header.frame_id, when
+                )
+                return transform_from_msg(tf.transform)
+            except tf2_ros.TransformException as exc:
+                error = exc
+        self.get_logger().warn(
+            f"TF {msg.header.frame_id}: {error}", throttle_duration_sec=5.0
+        )
+        return None
 
     def _publish(self, est, stamp) -> None:
         port = PoseWithCovarianceStamped()

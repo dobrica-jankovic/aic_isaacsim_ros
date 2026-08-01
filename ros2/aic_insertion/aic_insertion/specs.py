@@ -192,6 +192,7 @@ class ControlSpec:
     """Motion and guard parameters. Mirrors the IsaacLab planner where noted."""
 
     servo_rate_hz: float = 20.0
+    observe_height_m: float = 0.28           # tip height above the entrance plane at OBSERVE
     standoff_m: float = 0.05                 # planner: standoff above the entrance
     speed_scale_approach: float = 0.6        # planner phase speed scales
     speed_scale_align: float = 0.8
@@ -200,6 +201,9 @@ class ControlSpec:
     w_max: float = 0.50                      # rad/s cap before phase scaling
     dls_lambda: float = 0.01                 # upstream diff-IK damping
     max_joint_step: float = 0.05             # rad per servo cycle, safety clamp
+    windup_rad: float = 0.06                 # |q_cmd - q_meas| clamp (anti-windup)
+    settle_tol_m: float = 0.008              # measured error that ends a transit segment
+    settle_grace_s: float = 6.0              # extra settling time before moving on anyway
     success_pos_m: float = 0.003             # upstream termination spec
     success_rot_rad: float = math.radians(4.0)
     success_hold_s: float = 0.5
@@ -226,7 +230,7 @@ class DetectorSpec:
     adaptive_block: int = 31           # adaptiveThreshold neighbourhood (odd)
     adaptive_c: int = 7
     min_area_px: float = 20.0
-    side_tolerance: float = 0.30       # metric side-length gate, fractional
+    side_tolerance: float = 0.20       # metric side-length gate, fractional
     angle_tolerance_deg: float = 20.0  # corner right-angle gate
     pair_spacing_tol_m: float = 0.004
     pair_parallel_tol_deg: float = 12.0

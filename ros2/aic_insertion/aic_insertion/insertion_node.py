@@ -24,7 +24,9 @@ from .controller import Goals, InsertionStateMachine
 from .specs import (
     ARM_JOINTS,
     BASE_FRAME,
+    CARD_PRIOR,
     CONTROL,
+    EEF_QUAT_IN_PORT,
     ENTRANCE_POSE_TOPIC,
     HOME_JOINT_POSITIONS,
     JOINT_COMMAND_TOPIC,
@@ -36,18 +38,43 @@ from .specs import (
     WORLD_FRAME,
     WRENCH_TOPIC,
 )
-from .transforms import compose, pose_from_msg, rotvec_between, transform_from_msg
+from .transforms import (
+    compose,
+    pose_from_msg,
+    quat_mul,
+    quat_normalize,
+    rotvec_between,
+    transform_from_msg,
+)
 
 KP_POS = 4.0
 KP_ROT = 4.0
 HOME_RAMP_S = 4.0
 
 
+def _observe_pose(spec) -> tuple:
+    """Tip pose above the prior card region, cameras looking down at it.
+
+    Position: centre of the randomization envelope's port area, lifted by the
+    observe height. Orientation: the entrance-goal orientation at zero yaw —
+    the same grip the descent will use.
+    """
+
+    (x0, x1), (y0, y1) = CARD_PRIOR.xy_bounds()
+    default_quat = np.asarray(CARD_PRIOR.default_quat)
+    plane_z = CARD_PRIOR.default_pos[2] + 0.07737
+    pos = np.array(
+        [0.5 * (x0 + x1), 0.5 * (y0 + y1), plane_z + spec.observe_height_m]
+    )
+    quat = quat_normalize(quat_mul(default_quat, np.asarray(EEF_QUAT_IN_PORT)))
+    return pos, quat
+
+
 class InsertionNode(Node):
     def __init__(self):
         super().__init__("aic_insertion")
         self.spec = CONTROL
-        self.machine = InsertionStateMachine(self.spec)
+        self.machine = InsertionStateMachine(self.spec, observe_pose=_observe_pose(self.spec))
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
@@ -62,6 +89,7 @@ class InsertionNode(Node):
         self.force_tare: np.ndarray | None = None
         self.home_start: float | None = None
         self.q_home_from: np.ndarray | None = None
+        self.last_target: tuple | None = None
         self.last_state = ""
 
         self.pub_cmd = self.create_publisher(JointState, JOINT_COMMAND_TOPIC, 10)
@@ -109,40 +137,51 @@ class InsertionNode(Node):
         if not self._home_done(now):
             return
 
-        tip_cmd = self._tip_pose(self.q_cmd)
         tip_meas = self._tip_pose(self.q_meas)
-        gap = float(np.linalg.norm(tip_cmd[0] - tip_meas[0]))
+        gap = 0.0
+        if self.last_target is not None:
+            gap = float(np.linalg.norm(self.last_target[0] - tip_meas[0]))
         if not self._watchdog(tip_meas):
             self.machine.state = "FAILED"
 
         target = self.machine.update(
-            now, tip_cmd, tip_meas, self._goals(now), self._wrench_dev(), gap
+            now, tip_meas, self._goals(now), self._wrench_dev(), gap
         )
         if self.machine.wants_tare and self.force_filt is not None:
             self.force_tare = self.force_filt.copy()
         if target is not None:
-            self._servo_to(target)
+            self.last_target = target
+        if self.last_target is not None:
+            self._servo_to(self.last_target)
         self._publish_cmd()
         self._publish_status()
 
     def _servo_to(self, tip_target: tuple) -> None:
+        # Closed loop on the MEASURED joints: the drives are a stiff PD and sag
+        # ~1-2 deg under gravity, so an open-loop command integration parks the
+        # tip centimetres off target. Servoing the measurement lets q_cmd float
+        # above the target by exactly the sag.
         dt = 1.0 / self.spec.servo_rate_hz
         tcp_target = kin.tcp_from_tip(tip_target)
-        tcp_cmd = compose(self.T_wb, kin.fk_tcp(self.q_cmd))
+        tcp_meas = compose(self.T_wb, kin.fk_tcp(self.q_meas))
 
-        v = KP_POS * (tcp_target[0] - tcp_cmd[0])
-        w = KP_ROT * rotvec_between(tcp_cmd[1], tcp_target[1])
+        v = KP_POS * (tcp_target[0] - tcp_meas[0])
+        w = KP_ROT * rotvec_between(tcp_meas[1], tcp_target[1])
         scale = self.machine.segment.speed_scale if self.machine.segment else 1.0
-        v = _clamp_norm(v, scale * self.spec.v_max)
-        w = _clamp_norm(w, scale * self.spec.w_max)
+        v = _clamp_norm(v, max(scale * self.spec.v_max, 0.02))
+        w = _clamp_norm(w, max(scale * self.spec.w_max, 0.1))
 
         # Twist into base_link axes: the Jacobian lives there.
         R_wb_inv_v = _rotate_inv(self.T_wb[1], v)
         R_wb_inv_w = _rotate_inv(self.T_wb[1], w)
         twist = np.concatenate([R_wb_inv_v, R_wb_inv_w])
-        dq = kin.dls_step(kin.jacobian(self.q_cmd), twist, self.spec.dls_lambda) * dt
+        dq = kin.dls_step(kin.jacobian(self.q_meas), twist, self.spec.dls_lambda) * dt
         dq = np.clip(dq, -self.spec.max_joint_step, self.spec.max_joint_step)
-        self.q_cmd = self.q_cmd + dq
+        # Anti-windup: never let the command run far from the measurement, or a
+        # jam would integrate unbounded contact force.
+        self.q_cmd = np.clip(
+            self.q_cmd + dq, self.q_meas - self.spec.windup_rad, self.q_meas + self.spec.windup_rad
+        )
 
     # ---------------------------------------------------------------- helpers
 

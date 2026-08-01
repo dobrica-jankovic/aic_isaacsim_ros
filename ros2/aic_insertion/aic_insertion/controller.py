@@ -75,12 +75,18 @@ class Goals:
 
 
 class InsertionStateMachine:
-    """States: WAIT_ESTIMATE -> APPROACH -> REFINE -> INSERT -> SEATED,
-    with RETREAT looping back to REFINE on a guarded failure."""
+    """States: OBSERVE -> WAIT_ESTIMATE -> APPROACH -> REFINE -> INSERT ->
+    SEATED, with RETREAT looping back to REFINE on a guarded failure.
 
-    def __init__(self, spec: ControlSpec):
+    OBSERVE exists because the task's home pose keeps the wrist cameras away
+    from the board: the machine first moves the tip above the prior card
+    region, cameras down, so perception has something to look at.
+    """
+
+    def __init__(self, spec: ControlSpec, observe_pose: tuple | None = None):
         self.spec = spec
-        self.state = "WAIT_ESTIMATE"
+        self.observe_pose = observe_pose
+        self.state = "OBSERVE" if observe_pose is not None else "WAIT_ESTIMATE"
         self.segment: Segment | None = None
         self.goals: Goals | None = None
         self.retries = 0
@@ -88,12 +94,12 @@ class InsertionStateMachine:
         self._hold_start: float | None = None
         self.wants_tare = False
 
-    # The node calls this every servo tick.
+    # The node calls this every servo tick. ``tip`` is the MEASURED tip pose;
+    # segments are planned from it so trajectories start where the arm really is.
     def update(
         self,
         t: float,
-        tip_cmd: tuple,
-        tip_meas: tuple,
+        tip: tuple,
         goals: Goals | None,
         wrench_dev: float,
         tracking_gap: float,
@@ -104,95 +110,116 @@ class InsertionStateMachine:
         if goals is not None:
             self.goals = goals
         handler = getattr(self, f"_state_{self.state.lower()}")
-        return handler(t, tip_cmd, tip_meas, wrench_dev, tracking_gap)
+        return handler(t, tip, wrench_dev, tracking_gap)
+
+    def _segment_settled(self, t: float, tip: tuple) -> bool:
+        """Segment time elapsed AND the measured pose reached its endpoint
+        (with a grace timeout so a marginal residual cannot wedge the machine)."""
+
+        if not self.segment.done(t):
+            return False
+        err = float(np.linalg.norm(tip[0] - self.segment.end[0]))
+        overtime = t - self.segment.t0 - self.segment.duration
+        return err < self.spec.settle_tol_m or overtime > self.spec.settle_grace_s
 
     # ----------------------------------------------------------------- states
 
-    def _state_wait_estimate(self, t, tip_cmd, tip_meas, wrench_dev, gap):
+    def _state_observe(self, t, tip, wrench_dev, gap):
+        if self.segment is None:
+            self.segment = make_segment(
+                tip, self.observe_pose, self.spec.speed_scale_approach, self.spec, t
+            )
+        if self._segment_settled(t, tip):
+            self.segment = None
+            self.state = "WAIT_ESTIMATE"
+            return None
+        return self.segment.sample(t)
+
+    def _state_wait_estimate(self, t, tip, wrench_dev, gap):
         if not self._estimate_ready():
             return None
         self.segment = make_segment(
-            tip_cmd, self._standoff_pose(), self.spec.speed_scale_approach, self.spec, t
+            tip, self._standoff_pose(), self.spec.speed_scale_approach, self.spec, t
         )
         self.state = "APPROACH"
         return self.segment.sample(t)
 
-    def _state_approach(self, t, tip_cmd, tip_meas, wrench_dev, gap):
-        if self.segment.done(t):
+    def _state_approach(self, t, tip, wrench_dev, gap):
+        if self._segment_settled(t, tip):
             self.state = "REFINE"
             self._refine_enter_t = t
             return None
         return self.segment.sample(t)
 
-    def _state_refine(self, t, tip_cmd, tip_meas, wrench_dev, gap):
+    def _state_refine(self, t, tip, wrench_dev, gap):
         if t - self._refine_enter_t < self.spec.settle_before_insert_s:
             return None
         if not self._estimate_ready():
             self._refine_enter_t = t  # estimate went stale: keep waiting
             return None
         standoff = self._standoff_pose()
-        lateral = float(np.linalg.norm((standoff[0] - tip_cmd[0])[:2]))
-        if lateral > 0.001:
+        lateral = float(np.linalg.norm((standoff[0] - tip[0])[:2]))
+        if lateral > 0.0015:
             self.segment = make_segment(
-                tip_cmd, standoff, self.spec.speed_scale_align, self.spec, t
+                tip, standoff, self.spec.speed_scale_align, self.spec, t
             )
             self.state = "ALIGN"
             return self.segment.sample(t)
         self.wants_tare = True
         self.segment = make_segment(
-            tip_cmd, self._seat_pose(), self.spec.speed_scale_insert, self.spec, t
+            tip, self._seat_pose(), self.spec.speed_scale_insert, self.spec, t
         )
         self.state = "INSERT"
         return self.segment.sample(t)
 
-    def _state_align(self, t, tip_cmd, tip_meas, wrench_dev, gap):
-        if self.segment.done(t):
+    def _state_align(self, t, tip, wrench_dev, gap):
+        if self._segment_settled(t, tip):
             self.state = "REFINE"
             self._refine_enter_t = t - self.spec.settle_before_insert_s  # recheck now
             return None
         return self.segment.sample(t)
 
-    def _state_insert(self, t, tip_cmd, tip_meas, wrench_dev, gap):
+    def _state_insert(self, t, tip, wrench_dev, gap):
         jammed = wrench_dev > self.spec.contact_force_n or gap > self.spec.stall_pos_m
         if jammed and not self.segment.done(t):
-            return self._begin_retreat(t, tip_cmd)
+            return self._begin_retreat(t, tip)
         if self.segment.done(t):
-            err_pos = float(np.linalg.norm(tip_meas[0] - self._seat_pose()[0]))
-            err_rot = quat_angle(tip_meas[1], self._seat_pose()[1])
+            err_pos = float(np.linalg.norm(tip[0] - self._seat_pose()[0]))
+            err_rot = quat_angle(tip[1], self._seat_pose()[1])
             if err_pos < self.spec.success_pos_m and err_rot < self.spec.success_rot_rad:
                 if self._hold_start is None:
                     self._hold_start = t
                 elif t - self._hold_start >= self.spec.success_hold_s:
                     self.state = "SEATED"
-            else:
+            elif t - self.segment.t0 - self.segment.duration > self.spec.settle_grace_s:
                 self._hold_start = None
-                return self._begin_retreat(t, tip_cmd)
+                return self._begin_retreat(t, tip)
         return self.segment.sample(t)
 
-    def _state_retreat(self, t, tip_cmd, tip_meas, wrench_dev, gap):
+    def _state_retreat(self, t, tip, wrench_dev, gap):
         if self.segment.done(t):
             self.state = "REFINE"
             self._refine_enter_t = t
             return None
         return self.segment.sample(t)
 
-    def _state_seated(self, t, tip_cmd, tip_meas, wrench_dev, gap):
+    def _state_seated(self, t, tip, wrench_dev, gap):
         return None  # hold position; the run is a success
 
-    def _state_failed(self, t, tip_cmd, tip_meas, wrench_dev, gap):
+    def _state_failed(self, t, tip, wrench_dev, gap):
         return None
 
     # ---------------------------------------------------------------- helpers
 
-    def _begin_retreat(self, t, tip_cmd):
+    def _begin_retreat(self, t, tip):
         self.retries += 1
         self._hold_start = None
         if self.retries > self.spec.max_retries:
             self.state = "FAILED"
             return None
-        up = tip_cmd[0] + np.array([0.0, 0.0, self.spec.retreat_m])
+        up = tip[0] + np.array([0.0, 0.0, self.spec.retreat_m])
         self.segment = make_segment(
-            tip_cmd, (up, self._standoff_pose()[1]),
+            tip, (up, self._standoff_pose()[1]),
             self.spec.speed_scale_align, self.spec, t,
         )
         self.state = "RETREAT"
