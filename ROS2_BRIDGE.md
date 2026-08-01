@@ -40,6 +40,42 @@ ros2 topic pub /joint_command sensor_msgs/msg/JointState \
   "{name: ['shoulder_pan_joint','shoulder_lift_joint','elbow_joint','wrist_1_joint','wrist_2_joint','wrist_3_joint'], position: [-0.5,-1.2,1.0,-1.5,1.0,0.3]}" -r 20
 ```
 
+## State & continuity (read this first if picking up the work)
+
+- **The scene and the graph are in-memory only.** `load_aic_scene.py` references
+  the assets into the live stage and `build_ros2_bridge.py` creates the graph in
+  the live stage — **nothing is saved to a `.usd`**. If the Isaac Sim process is
+  restarted, both are gone. Re-run steps 2–4 in *Usage* to rebuild (takes seconds).
+  To make it persistent instead, save the stage:
+  `omni.usd.get_context().save_as_stage("<repo>/aic_ros2_scene.usd")`.
+- **Reconnecting after a chat/session reset:** the sim is a standalone OS process
+  on `127.0.0.1:8226` — no session state is needed. `nc -z 127.0.0.1 8226` to
+  check it's up (see `REMOTE_SIM_SETUP.md`), then talk to it again. If the port is
+  gone, relaunch the sim and re-run steps 2–4.
+- **Scripts use hardcoded absolute paths.** `build_ros2_bridge.py` has a `REPO`
+  constant and the two ScriptNode bodies are loaded by absolute path from it;
+  `load_aic_scene.py` has `ASSET_DIR`. If the repo or IsaacLab checkout moves,
+  update those constants.
+- **`build_ros2_bridge.py` mutates the robot at runtime**: it sets the 6 arm
+  joints' drive stiffness=2000/damping=100 (the IsaacLab actuator gains) so
+  `/joint_command` tracks accurately. The raw USD ships with much lower gains
+  (~95–100), which track poorly under gravity.
+
+## Status & next steps
+
+Done and verified end-to-end (all 11 topics echo over ROS 2 Jazzy; `/joint_command`
+moves the arm to commanded poses exactly). Not done / optional follow-ups:
+
+- **Decouple fast publishers from the render rate.** Everything currently runs at
+  ~10 Hz because the 3 camera render products gate the shared `OnPlaybackTick`.
+  For high-rate joint/clock/wrench, drive those nodes from a separate non-render
+  trigger (e.g. `IsaacOnPhysicsStep`) — the cameras stay on `OnPlaybackTick`.
+- **Persist the stage to `.usd`** (see above) if you don't want to re-run scripts.
+- **Depth/segmentation** camera outputs (only `rgb` is published today; add more
+  `ROS2CameraHelper` nodes with `type=depth`/`semantic_segmentation`).
+- **URDF + robot_state_publisher / MoveIt** on the ROS side if you want a proper
+  planning stack (the `/joint_states` + `/tf` we publish are already compatible).
+
 ## Files (`scripts/`)
 
 - `load_aic_scene.py` — references robot + workcell + board + ports + target at their scene poses.
