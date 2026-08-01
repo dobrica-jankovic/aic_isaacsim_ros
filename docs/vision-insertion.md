@@ -364,7 +364,35 @@ Perception, by contrast, needed no correction: the estimator locked onto the
 card during the transit and held `std_xy = 0.14 mm` throughout, and the
 standoff arrival landed within 0.8 mm of the predicted pose.
 
-## 8. Implementation plan
+## 8. Where this stands, and what to do next
+
+**Done and validated.** The frame analysis, the vendored geometry (checked
+against its sources by `verify_specs.py`), the kinematics, the perception
+pipeline, and the ROS 2 module are complete and measured. Vision alone
+localises the card to well under a millimetre and holds that estimate while
+the arm moves; the controller takes the plug from the home pose to
+`insertion_fraction ≈ 0.92` without ever reading a privileged topic.
+
+**The open item is the last few millimetres**, and it is a control problem,
+not a perception one. The plug and the opening are both 13.96 mm — zero
+nominal clearance — so seating is a press fit. A stiff position controller
+has only two behaviours there: back off (and stall short), or push through
+(and overshoot). Neither is seating. In priority order:
+
+1. **Admittance control for the final 10 mm.** Command a small downward
+   force rather than a position, and let lateral compliance find the hole.
+   This is the textbook answer and needs no new sensing if the compliance is
+   synthesised from the joint-level position error (which this module already
+   measures as `windup`).
+2. **A lateral search pattern under load.** The current retry offsets the
+   whole descent by a fixed ring; a proper Archimedean spiral executed *while
+   in contact* is what production peg-in-hole uses.
+3. **Relocate the F/T sensing.** Nothing on this platform can measure
+   insertion force while the cable hangs off the sensor (§7.6). A sensor
+   below the strain relief, or a cable takeup, would make real force control
+   possible and is worth more than any amount of tuning above it.
+
+## 9. Implementation plan
 
 1. Package skeleton (`ros2/aic_insertion/`: ament_python, launch, config,
    README) + `specs.py` + `verify_specs.py`.
