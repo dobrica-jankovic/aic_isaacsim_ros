@@ -111,3 +111,13 @@ source /opt/ros/jazzy/setup.bash
 **The test that catches the whole class of save/reload bug** is: regenerate the
 stage, kill the process, relaunch, open the stage, press Play, and check all 15
 topics. Nothing else finds it -- the bridge comes up wrong rather than failing.
+
+```bash
+~/isaacsim-6.0/_build/linux-x86_64/release/python.sh run_sim.py \
+    --headless --stage $PWD/stages/aic_ros2_scene.usd
+```
+
+Because that failure is silent, `--stage` prints the reopened graph's node
+count, every topic it actually asks for, and any compute errors, so a wrong
+reload is visible without a ROS shell. A graph that reverted to OGN defaults
+shows up there as `topic /rgb`.

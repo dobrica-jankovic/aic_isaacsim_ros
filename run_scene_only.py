@@ -72,6 +72,7 @@ def main() -> None:
         stage, AIC_PORT_INSERTION_LAYOUT, include_robot=args.robot
     )
     print(describe_scene(stage, spawned))
+    _frame_on_board(AIC_PORT_INSERTION_LAYOUT)
     if args.save:
         context.save_stage()
 
@@ -102,6 +103,20 @@ def main() -> None:
         layout_index += 1
 
     app.close()
+
+
+def _frame_on_board(layout) -> None:
+    """Point the viewport at the fixtures the randomization actually moves.
+
+    The default persp camera sits far enough out that the board is a few pixels
+    across, which makes both the window and any capture useless for judging a
+    layout.
+    """
+
+    from isaacsim.core.utils.viewports import set_camera_view
+
+    x, y, z = layout.board_slot.pose.pos
+    set_camera_view(eye=(x + 0.4, y - 0.4, z + 0.35), target=(x, y, z + 0.03))
 
 
 def _capture(directory: str, index: int, app) -> None:
