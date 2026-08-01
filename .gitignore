@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# Generated stages — rebuild with scripts/build_stage.py
+stages/
