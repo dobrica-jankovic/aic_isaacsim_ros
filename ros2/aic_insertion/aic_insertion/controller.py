@@ -114,6 +114,7 @@ class InsertionStateMachine:
         self.retries = 0
         self._refine_enter_t: float | None = None
         self._hold_start: float | None = None
+        self._stall_mark: tuple = (0.0, None)
         self.wants_tare = False
 
     # The node calls this every servo tick. ``tip`` is the MEASURED tip pose;
@@ -133,6 +134,25 @@ class InsertionStateMachine:
             self.goals = goals
         handler = getattr(self, f"_state_{self.state.lower()}")
         return handler(t, tip, wrench_dev, tracking_gap)
+
+    def _stalled(self, t: float, tip: tuple) -> bool:
+        """True when the tip has stopped advancing while still being commanded.
+
+        Stall is *absence of progress*, not tracking error: the stiff drives
+        sag under load, so the measurement trails the command by a steady
+        offset that says nothing about contact.
+        """
+
+        mark_t, mark_pos = self._stall_mark
+        if mark_pos is None or t - mark_t >= self.spec.stall_window_s:
+            moved = (
+                float(np.linalg.norm(tip[0] - mark_pos))
+                if mark_pos is not None
+                else float("inf")
+            )
+            self._stall_mark = (t, tip[0].copy())
+            return moved < self.spec.stall_progress_m
+        return False
 
     def _segment_settled(self, t: float, tip: tuple) -> bool:
         """Segment time elapsed AND the measured pose reached its endpoint
@@ -188,6 +208,7 @@ class InsertionStateMachine:
             self.state = "ALIGN"
             return self.segment.sample(t)
         self.wants_tare = True
+        self._stall_mark = (t, tip[0].copy())
         self.segment = make_segment(
             tip, self._seat_pose(), self.spec.speed_scale_insert, self.spec, t
         )
@@ -202,7 +223,7 @@ class InsertionStateMachine:
         return self.segment.sample(t)
 
     def _state_insert(self, t, tip, wrench_dev, gap):
-        jammed = wrench_dev > self.spec.contact_force_n or gap > self.spec.stall_pos_m
+        jammed = wrench_dev > self.spec.contact_force_n or self._stalled(t, tip)
         if jammed and not self.segment.done(t):
             return self._begin_retreat(t, tip)
         if self.segment.done(t):

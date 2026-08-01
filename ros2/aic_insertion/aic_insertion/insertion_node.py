@@ -263,11 +263,31 @@ class InsertionNode(Node):
     def _publish_status(self) -> None:
         state = self.machine.state
         if state != self.last_state:
-            self.get_logger().info(f"state: {self.last_state or 'START'} -> {state}")
+            self.get_logger().info(
+                f"state: {self.last_state or 'START'} -> {state} | {self._diagnostics()}"
+            )
             self.last_state = state
         msg = String()
         msg.data = f"{state} retries={self.machine.retries}"
         self.pub_status.publish(msg)
+
+    def _diagnostics(self) -> str:
+        """One line of the signals that decide transitions — read this first
+        when a run ends in FAILED."""
+
+        tip = self._tip_pose(self.q_meas)
+        parts = [f"tip=({tip[0][0]:.4f},{tip[0][1]:.4f},{tip[0][2]:.4f})"]
+        if self.last_target is not None:
+            err = np.linalg.norm(self.last_target[0] - tip[0])
+            parts.append(f"track_err={err * 1000:.1f}mm")
+        if self.seat is not None:
+            parts.append(
+                f"seat_err={np.linalg.norm(self.seat[0] - tip[0]) * 1000:.1f}mm"
+            )
+        parts.append(f"wrench_dev={self._wrench_dev():.1f}N")
+        parts.append(f"std_xy={self.std_xy * 1000:.2f}mm")
+        parts.append(f"windup={np.max(np.abs(self.q_cmd - self.q_meas)):.3f}rad")
+        return " ".join(parts)
 
 
 def _clamp_norm(v: np.ndarray, limit: float) -> np.ndarray:

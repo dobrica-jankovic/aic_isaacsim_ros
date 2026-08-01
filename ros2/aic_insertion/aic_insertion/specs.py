@@ -210,8 +210,12 @@ class ControlSpec:
     w_max: float = 0.50                      # rad/s cap before phase scaling
     dls_lambda: float = 0.01                 # upstream diff-IK damping
     max_joint_step: float = 0.05             # rad per servo cycle, safety clamp
-    windup_rad: float = 0.06                 # |q_cmd - q_meas| clamp (anti-windup)
-    settle_tol_m: float = 0.008              # measured error that ends a transit segment
+    # |q_cmd - q_meas| clamp (anti-windup). The stiff PD drives sag under the
+    # tool load, so the command must be allowed to lead the measurement by the
+    # sag or the tip parks centimetres high; 0.06 rad was measured to cap out
+    # at a 20 mm standing error.
+    windup_rad: float = 0.25
+    settle_tol_m: float = 0.003              # measured error that ends a transit segment
     settle_grace_s: float = 6.0              # extra settling time before moving on anyway
     success_pos_m: float = 0.003             # upstream termination spec
     success_rot_rad: float = math.radians(4.0)
@@ -220,7 +224,8 @@ class ControlSpec:
     estimate_max_age_s: float = 1.0
     estimate_max_std_m: float = 0.0015
     contact_force_n: float = 8.0             # deviation from tare that means "jam"
-    stall_pos_m: float = 0.006               # commanded-vs-measured gap that means "stuck"
+    stall_progress_m: float = 0.0015         # min tip travel per stall window
+    stall_window_s: float = 2.0              # window over which that travel must happen
     retreat_m: float = 0.02
     max_retries: int = 3
     retry_spiral_m: float = 0.0006
