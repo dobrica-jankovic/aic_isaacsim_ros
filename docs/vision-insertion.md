@@ -327,6 +327,16 @@ not, and each one is worth more than the plan that preceded it.
 5. **Recovery must return to where it left from.** RETREAT lifts along the
    insertion axis, so a lateral-only "am I at the standoff?" test let each
    retry begin 20 mm higher than the last.
+6. **The wrist F/T cannot sense this insertion.** The sensor carries the
+   compliant fibre cable, and the cable's swing alone moves the reading by up
+   to **32 N** with the plug in free space (measured over an 18 s hold; raw
+   |F| ≈ 27 N, per-axis σ up to 11.8 N). The force a 14 mm plastic plug
+   generates entering its cage is far below that. The design's "force-guarded
+   descent" therefore had to be demoted: the wrench guard is now a
+   hard-crash backstop (45 N, sustained 0.5 s) and *jam detection rests on
+   the stall test*. This is a property of the platform, not of a threshold
+   choice — a real cell would need the F/T below the cable strain relief, or
+   a cable takeup, before force control means anything here.
 
 Perception, by contrast, needed no correction: the estimator locked onto the
 card during the transit and held `std_xy = 0.14 mm` throughout, and the
