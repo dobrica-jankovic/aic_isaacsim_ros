@@ -214,7 +214,8 @@ class InsertionStateMachine:
             self.state = "ALIGN"
             return self.segment.sample(t)
         self.wants_tare = True
-        self._stall_mark = (t, tip[0].copy())
+        # Re-primed on the first INSERT tick, once the segment exists.
+        self._stall_mark = (t, None, None)
         self.segment = make_segment(
             tip, self._seat_pose(), self.spec.speed_scale_insert, self.spec, t
         )

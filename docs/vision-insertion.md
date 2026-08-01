@@ -54,9 +54,15 @@ model knowledge a real deployment would take from CAD/URDF):
 - **The SFP tip is rigid w.r.t. the gripper.** The chain
   finger→`lc_plug`→`sfp_module`→`sfp_tip_link` is all fixed joints; the
   compliant rope hangs off the plug but does not move the tip. Constant
-  transform (from the USD):
-  `T(gripper_tcp→sfp_tip_link) = pos(-0.00431, -0.01745, 0.05678),
-  quat wxyz(0, 0, 0.59482, 0.80386)`.
+  transform: `T(gripper_tcp→sfp_tip_link) = pos(-0.00431, -0.01746, 0.05677),
+  quat wxyz(0, 0, 0.98901, 0.14782)`.
+  **This must be read from the joint constraint frames, not from the authored
+  xforms.** The two disagree by 90° about the tool axis, and PhysX snaps the
+  assembly onto the joints at Play — so the stage's authored poses describe a
+  configuration that never exists at runtime. Taking the authored value put
+  every commanded TCP pose 84 mm from the truth, which cost a full debugging
+  cycle (§8). `verify_specs.py` now derives it from the joints and the value
+  is confirmed live against `/tf`.
 - **`sfp_tip_link_robot` in `/tf` is junk.** It is a rigid body with *no
   joint* attaching it — it free-falls on Play. The physical tip
   (`cable/sfp_module/sfp_tip_link`) is not in `/tf`. The tip pose is therefore
@@ -288,7 +294,45 @@ Design points:
 5. **Robustness probes**: lighting extremes of the DR range, single-camera
    dropout, deliberately biased initial estimate (tests the RETRY path).
 
-## 7. Implementation plan
+## 7. What the live runs changed
+
+The plan above survived contact with the simulator; the details below did
+not, and each one is worth more than the plan that preceded it.
+
+1. **The tool transform was wrong, and everything downstream lied.** Reading
+   `tcp→tip` from the authored USD xforms (rather than the joint constraint
+   frames PhysX actually enforces) put every commanded TCP pose 84 mm off.
+   The symptom was not "the arm misses" — it was "the goal orientation looks
+   unreachable and the elbow collapses into the stretched singularity",
+   which sent me hunting for IK branches, workspace limits and a
+   joint-space transit that were all red herrings. **Validate a tool frame
+   against the running system before trusting any Cartesian goal built on
+   it.** One 30-second measurement against `/tf` would have replaced hours.
+2. **Segments must interpolate in TCP space, not tip space.** Rotating about
+   the tip orbits the whole 26 cm tool through the workspace boundary;
+   rotating about the TCP keeps the wrist nearly still. The upstream planner
+   already did this ("shifts each segment endpoint to the TCP frame at plan
+   time") — the reason was not obvious until the arm demonstrated it.
+3. **The stiff PD drives sag, so the command must lead the measurement.**
+   Closing the servo loop on `/joint_states` is necessary but not
+   sufficient: an anti-windup clamp of 0.06 rad silently capped the
+   achievable correction and parked the tip 20 mm high at every waypoint.
+   0.25 rad is still bounded but clears the sag.
+4. **Stall detection must be scale-free.** Comparing command to measurement
+   flags the (harmless, constant) sag; comparing measured travel to a fixed
+   threshold flags the quintic's own rest-to-rest start, which commands only
+   ~1.2 mm in its first two seconds. Comparing measured travel to *commanded*
+   travel over the same window is quiet in both cases and still catches a
+   real jam.
+5. **Recovery must return to where it left from.** RETREAT lifts along the
+   insertion axis, so a lateral-only "am I at the standoff?" test let each
+   retry begin 20 mm higher than the last.
+
+Perception, by contrast, needed no correction: the estimator locked onto the
+card during the transit and held `std_xy = 0.14 mm` throughout, and the
+standoff arrival landed within 0.8 mm of the predicted pose.
+
+## 8. Implementation plan
 
 1. Package skeleton (`ros2/aic_insertion/`: ament_python, launch, config,
    README) + `specs.py` + `verify_specs.py`.
