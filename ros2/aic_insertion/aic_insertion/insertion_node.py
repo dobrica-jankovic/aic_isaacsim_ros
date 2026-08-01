@@ -29,6 +29,7 @@ from .specs import (
     EEF_QUAT_IN_PORT,
     ENTRANCE_POSE_TOPIC,
     HOME_JOINT_POSITIONS,
+    OBSERVE_TIP_POS,
     JOINT_COMMAND_TOPIC,
     JOINT_STATES_TOPIC,
     PORT_POSE_TOPIC,
@@ -52,29 +53,23 @@ KP_ROT = 4.0
 HOME_RAMP_S = 4.0
 
 
-def _observe_pose(spec) -> tuple:
-    """Tip pose above the prior card region, cameras looking down at it.
+def _observe_pose() -> tuple:
+    """Camera hover: tip above the near side of the card's prior region, in
+    the insertion orientation, so all three wrist cameras look down at the
+    openings. Near-side keeps the arm well inside the workspace and the card
+    out of the gripper's blind cone."""
 
-    Position: centre of the randomization envelope's port area, lifted by the
-    observe height. Orientation: the entrance-goal orientation at zero yaw —
-    the same grip the descent will use.
-    """
-
-    (x0, x1), (y0, y1) = CARD_PRIOR.xy_bounds()
-    default_quat = np.asarray(CARD_PRIOR.default_quat)
-    plane_z = CARD_PRIOR.default_pos[2] + 0.07737
-    pos = np.array(
-        [0.5 * (x0 + x1), 0.5 * (y0 + y1), plane_z + spec.observe_height_m]
+    quat = quat_normalize(
+        quat_mul(np.asarray(CARD_PRIOR.default_quat), np.asarray(EEF_QUAT_IN_PORT))
     )
-    quat = quat_normalize(quat_mul(default_quat, np.asarray(EEF_QUAT_IN_PORT)))
-    return pos, quat
+    return np.asarray(OBSERVE_TIP_POS), quat
 
 
 class InsertionNode(Node):
     def __init__(self):
         super().__init__("aic_insertion")
         self.spec = CONTROL
-        self.machine = InsertionStateMachine(self.spec, observe_pose=_observe_pose(self.spec))
+        self.machine = InsertionStateMachine(self.spec, observe_pose=_observe_pose())
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
@@ -89,6 +84,7 @@ class InsertionNode(Node):
         self.force_tare: np.ndarray | None = None
         self.home_start: float | None = None
         self.q_home_from: np.ndarray | None = None
+        self.ramp_queue: list | None = None
         self.last_target: tuple | None = None
         self.last_state = ""
 
@@ -186,26 +182,32 @@ class InsertionNode(Node):
     # ---------------------------------------------------------------- helpers
 
     def _home_done(self, now: float) -> bool:
-        """Cosine-ramp to the task home pose before the machine takes over."""
+        """Joint-space cosine ramp to the task home pose before the machine
+        takes over; every later motion is a Cartesian segment from there."""
 
-        home = np.asarray(HOME_JOINT_POSITIONS)
-        if self.home_start is None:
-            if float(np.max(np.abs(self.q_meas - home))) < 0.02:
-                self.home_start = -math.inf  # already there
-                return True
-            self.home_start = now
-            self.q_home_from = self.q_cmd.copy()
-        if self.home_start == -math.inf:
-            return True
-        tau = (now - self.home_start) / HOME_RAMP_S
-        if tau >= 1.0:
-            self.q_cmd = home.copy()
-            self.home_start = -math.inf
-            return True
-        a = 0.5 * (1.0 - math.cos(math.pi * tau))
-        self.q_cmd = self.q_home_from + a * (home - self.q_home_from)
-        self._publish_cmd()
-        return False
+        if self.ramp_queue is None:
+            self.ramp_queue = [(np.asarray(HOME_JOINT_POSITIONS), HOME_RAMP_S)]
+        while self.ramp_queue:
+            target, duration = self.ramp_queue[0]
+            if self.home_start is None:
+                if float(np.max(np.abs(self.q_meas - target))) < 0.02:
+                    self.ramp_queue.pop(0)
+                    continue
+                self.home_start = now
+                self.q_home_from = self.q_cmd.copy()
+            tau = (now - self.home_start) / duration
+            if tau >= 1.0:
+                self.q_cmd = target.copy()
+                self.home_start = None
+                self.ramp_queue.pop(0)
+                # Hold each waypoint one tick so the drives settle in order.
+                self._publish_cmd()
+                return False
+            a = 0.5 * (1.0 - math.cos(math.pi * tau))
+            self.q_cmd = self.q_home_from + a * (target - self.q_home_from)
+            self._publish_cmd()
+            return False
+        return True
 
     def _goals(self, now: float) -> Goals | None:
         if self.entrance is None or self.seat is None:

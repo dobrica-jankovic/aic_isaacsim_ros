@@ -43,6 +43,13 @@ def parse_args() -> argparse.Namespace:
         "224 was sized as an RL policy input; the vision insertion module "
         "documents its accuracy at 448.",
     )
+    parser.add_argument(
+        "--randomize-seed",
+        type=int,
+        default=None,
+        help="randomize board/parts/lighting before Play with this seed "
+        "(same sampler as run_scene_only.py) — for validation episodes",
+    )
     return parser.parse_args()
 
 
@@ -88,6 +95,19 @@ def main() -> None:
             context.save_as_stage(args.save)
         spawned = build_scene(context.get_stage(), AIC_PORT_INSERTION_LAYOUT)
         print(describe_scene(context.get_stage(), spawned))
+        if args.randomize_seed is not None:
+            import random
+
+            from aic_sim.randomize import randomize
+
+            poses, light = randomize(
+                context.get_stage(),
+                AIC_PORT_INSERTION_LAYOUT,
+                rng=random.Random(args.randomize_seed),
+            )
+            print(f"randomized layout, seed {args.randomize_seed}:")
+            for name, pose in poses.items():
+                print(f"  {name:10s} pos={tuple(round(v, 4) for v in pose.pos)}")
     for _ in range(10):
         app.update()
 

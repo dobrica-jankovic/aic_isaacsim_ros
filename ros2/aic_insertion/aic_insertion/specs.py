@@ -50,6 +50,12 @@ ARM_JOINTS = (
 #: Task default arm pose (mirrors ``aic_sim.specs.UR5E_ARM_JOINT_GROUP``).
 HOME_JOINT_POSITIONS = (0.1597, -1.3542, -1.6648, -1.6933, 1.5710, -1.7306)
 
+#: Camera-hover tip position for the OBSERVE state: near side of the card's
+#: randomization region, 0.15 m above the entrance plane. Offline-verified to
+#: track from home with a bent elbow and to keep the whole prior region inside
+#: the wrist cameras' footprint.
+OBSERVE_TIP_POS = (0.245, 0.20, 0.30)
+
 
 @dataclass(frozen=True)
 class ChainStep:
@@ -86,8 +92,12 @@ UR5E_TCP_CHAIN: tuple[ChainStep, ...] = (
 #: gripper_tcp -> sfp_tip_link. The tip is welded to the gripper through the
 #: finger -> lc_plug -> sfp_module fixed-joint chain, so this is a rigid tool
 #: constant (the compliant rope hangs off the plug and does not move the tip).
-TCP_TO_TIP_POS = (-0.00431279, -0.017448, 0.05677525)
-TCP_TO_TIP_QUAT = (0.0, 0.0, 0.59482279, 0.80385686)  # wxyz
+#: Measured from the RUNNING simulation (TF gripper_tcp vs the physical tip):
+#: the authored USD xforms disagree with the fixed-joint constraint frames by
+#: 90 degrees, and PhysX snaps the assembly onto the joints at Play — so this
+#: cannot be read from the stage's authored poses.
+TCP_TO_TIP_POS = (-0.00431098, -0.01745621, 0.05677496)
+TCP_TO_TIP_QUAT = (0.0, 0.0, 0.98901471, 0.14781712)  # wxyz
 
 
 @dataclass(frozen=True)
@@ -192,7 +202,6 @@ class ControlSpec:
     """Motion and guard parameters. Mirrors the IsaacLab planner where noted."""
 
     servo_rate_hz: float = 20.0
-    observe_height_m: float = 0.28           # tip height above the entrance plane at OBSERVE
     standoff_m: float = 0.05                 # planner: standoff above the entrance
     speed_scale_approach: float = 0.6        # planner phase speed scales
     speed_scale_align: float = 0.8

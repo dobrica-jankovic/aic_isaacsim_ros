@@ -90,19 +90,84 @@ def verify_nic_usd() -> None:
             check(f"{prefix} corner {corner}", port.corners[i], t, atol=1e-5)
 
 
+def _quat_mul(q1, q2):
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    return np.array([
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    ])
+
+
+def _quat_rot(q, v):
+    w = q[0]
+    u = np.asarray(q[1:])
+    v = np.asarray(v, dtype=float)
+    return v + 2.0 * np.cross(u, np.cross(u, v) + w * v)
+
+
+def _joint_frames(stage, name):
+    """(local0, local1) frames of a joint, each as (pos, quat wxyz)."""
+
+    for prim in stage.Traverse():
+        if prim.GetName() == name and prim.IsA(UsdPhysics.Joint):
+            j = UsdPhysics.Joint(prim)
+            out = []
+            for pos_attr, rot_attr in (
+                (j.GetLocalPos0Attr(), j.GetLocalRot0Attr()),
+                (j.GetLocalPos1Attr(), j.GetLocalRot1Attr()),
+            ):
+                p = np.array(list(pos_attr.Get()))
+                r = rot_attr.Get()
+                i = r.GetImaginary()
+                out.append((p, np.array([r.GetReal(), i[0], i[1], i[2]])))
+            return out
+    raise KeyError(name)
+
+
+def _compose(a, b):
+    return a[0] + _quat_rot(a[1], b[0]), _quat_mul(a[1], b[1])
+
+
+def _invert(a):
+    q = np.array([a[1][0], *(-np.asarray(a[1][1:]))])
+    return -_quat_rot(q, a[0]), q
+
+
+def _fixed_step(stage, joint):
+    """T_body0->body1 enforced by a fixed joint: T(l0) . T(l1)^-1."""
+
+    l0, l1 = _joint_frames(stage, joint)
+    return _compose(l0, _invert(l1))
+
+
 def verify_robot_usd() -> None:
     stage = Usd.Stage.Open(
         str(REPO / "assets/robots/ur5e_cable/aic_unified_robot_cable_sdf.usd")
     )
-    cache = UsdGeom.XformCache()
-    t, q = rel_pose(
-        cache, stage,
-        "/World/aic_unified_robot/gripper_tcp", "/World/cable/sfp_module/sfp_tip_link",
+
+    # The tool constant must come from the JOINT constraint frames — the
+    # authored xforms disagree with them by 90 deg and PhysX snaps the
+    # assembly onto the joints at Play.
+    base_tcp = _fixed_step(stage, "gripper_attach_tool_frame")
+    base_finger = _fixed_step(stage, "gripper_right_finger_joint")
+    tip = _compose(
+        _compose(
+            _compose(_invert(base_tcp), base_finger),
+            _fixed_step(stage, "gripper_attach_joint"),
+        ),
+        _compose(
+            _fixed_step(stage, "sfp_module_joint"),
+            _fixed_step(stage, "sfp_tip_joint"),
+        ),
     )
-    check("tcp->tip pos", ins.TCP_TO_TIP_POS, t, atol=1e-6)
+    check("tcp->tip pos (joint frames)", ins.TCP_TO_TIP_POS, tip[0], atol=2e-5)
+    q = tip[1]
     if np.dot(q, ins.TCP_TO_TIP_QUAT) < 0:  # q and -q are the same rotation
         q = -q
-    check("tcp->tip quat", ins.TCP_TO_TIP_QUAT, q, atol=1e-6)
+    check("tcp->tip quat (joint frames)", ins.TCP_TO_TIP_QUAT, q, atol=1e-4)
 
     joints = {}
     for prim in stage.Traverse():

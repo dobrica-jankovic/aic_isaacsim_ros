@@ -18,14 +18,28 @@ import numpy as np
 
 from .specs import ControlSpec
 from .transforms import quat_angle, quat_slerp, quintic
+from .ur5e_kin import tcp_from_tip, tip_from_tcp
 
 _QUINTIC_PEAK_VEL = 15.0 / 8.0
 
 
 @dataclass
 class Segment:
-    start: tuple
-    end: tuple
+    """Quintic pose segment, interpolated in **TCP space**.
+
+    Endpoints arrive as tip poses but are stored and interpolated as TCP
+    poses, exactly like the upstream planner ("shifts each segment endpoint
+    to the TCP frame at plan time"). Rotating about the TCP keeps the wrist
+    nearly stationary; rotating about the tip would orbit the whole 26 cm
+    tool through the reach boundary — that difference is what lets the ALIGN
+    rotation happen next to the port without unwinding the elbow.
+    ``sample`` converts back, so callers stay in tip space. ``end`` keeps the
+    tip endpoint for settle checks.
+    """
+
+    start_tcp: tuple
+    end_tcp: tuple
+    end: tuple  # tip-space endpoint
     duration: float
     speed_scale: float
     t0: float = 0.0
@@ -33,9 +47,9 @@ class Segment:
     def sample(self, t: float) -> tuple:
         tau = min(max((t - self.t0) / max(self.duration, 1e-6), 0.0), 1.0)
         s = quintic(tau)
-        pos = self.start[0] + s * (self.end[0] - self.start[0])
-        quat = quat_slerp(self.start[1], self.end[1], s)
-        return pos, quat
+        pos = self.start_tcp[0] + s * (self.end_tcp[0] - self.start_tcp[0])
+        quat = quat_slerp(self.start_tcp[1], self.end_tcp[1], s)
+        return tip_from_tcp((pos, quat))
 
     def done(self, t: float) -> bool:
         return t - self.t0 >= self.duration
@@ -44,14 +58,22 @@ class Segment:
 def make_segment(
     start: tuple, end: tuple, speed_scale: float, spec: ControlSpec, t0: float
 ) -> Segment:
-    """Size the duration so quintic peak velocity honours the phase speed cap."""
+    """Size the duration so quintic peak velocity honours the phase speed cap.
 
-    L = float(np.linalg.norm(end[0] - start[0]))
-    ang = quat_angle(start[1], end[1])
+    ``start``/``end`` are tip poses; see :class:`Segment` for the TCP shift.
+    """
+
+    start_tcp = tcp_from_tip(start)
+    end_tcp = tcp_from_tip(end)
+    L = float(np.linalg.norm(end_tcp[0] - start_tcp[0]))
+    ang = quat_angle(start_tcp[1], end_tcp[1])
     T_pos = _QUINTIC_PEAK_VEL * L / max(speed_scale * spec.v_max, 1e-9)
     T_rot = _QUINTIC_PEAK_VEL * ang / max(speed_scale * spec.w_max, 1e-9)
     duration = max(T_pos, T_rot, 0.25)
-    return Segment(start=start, end=end, duration=duration, speed_scale=speed_scale, t0=t0)
+    return Segment(
+        start_tcp=start_tcp, end_tcp=end_tcp, end=end,
+        duration=duration, speed_scale=speed_scale, t0=t0,
+    )
 
 
 def spiral_offset(attempt: int, radius: float) -> np.ndarray:
