@@ -224,8 +224,9 @@ class ControlSpec:
     estimate_max_age_s: float = 1.0
     estimate_max_std_m: float = 0.0015
     contact_force_n: float = 8.0             # deviation from tare that means "jam"
-    stall_progress_m: float = 0.0015         # min tip travel per stall window
-    stall_window_s: float = 2.0              # window over which that travel must happen
+    stall_progress_m: float = 0.0015         # commanded travel below this proves nothing
+    stall_ratio: float = 0.35                # measured/commanded travel that means "stuck"
+    stall_window_s: float = 2.0              # window the comparison is made over
     retreat_m: float = 0.02
     max_retries: int = 3
     retry_spiral_m: float = 0.0006

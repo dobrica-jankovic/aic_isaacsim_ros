@@ -114,7 +114,7 @@ class InsertionStateMachine:
         self.retries = 0
         self._refine_enter_t: float | None = None
         self._hold_start: float | None = None
-        self._stall_mark: tuple = (0.0, None)
+        self._stall_mark: tuple = (0.0, None, None)
         self.wants_tare = False
 
     # The node calls this every servo tick. ``tip`` is the MEASURED tip pose;
@@ -136,23 +136,28 @@ class InsertionStateMachine:
         return handler(t, tip, wrench_dev, tracking_gap)
 
     def _stalled(self, t: float, tip: tuple) -> bool:
-        """True when the tip has stopped advancing while still being commanded.
+        """True when the tip stops advancing *while the command is advancing*.
 
-        Stall is *absence of progress*, not tracking error: the stiff drives
-        sag under load, so the measurement trails the command by a steady
-        offset that says nothing about contact.
+        Both halves matter. Tracking error alone is not stall — the stiff
+        drives sag under load, and that offset is constant and harmless. Nor
+        is measured travel alone: the segment is a rest-to-rest quintic, so
+        near its ends the command barely moves and the tip rightly follows.
+        Stall is measured travel falling short of *commanded* travel.
         """
 
-        mark_t, mark_pos = self._stall_mark
-        if mark_pos is None or t - mark_t >= self.spec.stall_window_s:
-            moved = (
-                float(np.linalg.norm(tip[0] - mark_pos))
-                if mark_pos is not None
-                else float("inf")
-            )
-            self._stall_mark = (t, tip[0].copy())
-            return moved < self.spec.stall_progress_m
-        return False
+        mark_t, mark_pos, mark_cmd = self._stall_mark
+        if mark_pos is None:
+            self._stall_mark = (t, tip[0].copy(), self.segment.sample(t)[0])
+            return False
+        if t - mark_t < self.spec.stall_window_s:
+            return False
+        moved = float(np.linalg.norm(tip[0] - mark_pos))
+        commanded = float(np.linalg.norm(self.segment.sample(t)[0] - mark_cmd))
+        self._stall_mark = (t, tip[0].copy(), self.segment.sample(t)[0])
+        return (
+            commanded > self.spec.stall_progress_m
+            and moved < self.spec.stall_ratio * commanded
+        )
 
     def _segment_settled(self, t: float, tip: tuple) -> bool:
         """Segment time elapsed AND the measured pose reached its endpoint
@@ -200,8 +205,9 @@ class InsertionStateMachine:
             self._refine_enter_t = t  # estimate went stale: keep waiting
             return None
         standoff = self._standoff_pose()
-        lateral = float(np.linalg.norm((standoff[0] - tip[0])[:2]))
-        if lateral > 0.0015:
+        # Full 3D, not just lateral: RETREAT lifts along the insertion axis, so
+        # a lateral-only test would let each retry start higher than the last.
+        if float(np.linalg.norm(standoff[0] - tip[0])) > 0.0015:
             self.segment = make_segment(
                 tip, standoff, self.spec.speed_scale_align, self.spec, t
             )
