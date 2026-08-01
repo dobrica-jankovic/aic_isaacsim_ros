@@ -277,6 +277,28 @@ Design points:
 
 ## 6. Validation strategy
 
+Results obtained so far, on the default layout at `--camera-res 448`
+(perception never reads the cheat topics; they are the yardstick):
+
+| Stage | Result |
+|---|---|
+| Card pose vs ground truth | 0.35 mm (x), 0.61 mm (y), 0.12° yaw |
+| Estimate scatter once locked (`std_xy`) | 0.14 mm |
+| Corners fused per estimate | 24 (2 ports × 4 corners × 3 cameras) |
+| Lock-on | during the transit, before the hover completes |
+| Standoff arrival | 0.6–0.8 mm of the commanded pose |
+| Descent | `insertion_fraction` 0 → **0.92**, driven by vision alone |
+| Clean seat (< 3 mm, held 0.5 s) | not yet — see below |
+
+The perception half of the design is validated: the estimator beats its
+±0.5 mm budget by a comfortable margin and does so while the arm is moving.
+The remaining gap is the last few millimetres of *seating*, not sensing —
+the plug (13.96 mm) and the opening (13.96 mm) have zero nominal clearance,
+so the final travel is a press fit that a stiff position controller either
+stalls against or punches through. That is a force-control problem on a
+platform whose only force sensor is swamped by the cable (§7.6), and it is
+the honest boundary of what this design reaches.
+
 1. **Spec drift**: `verify_specs.py` — package constants vs `aic_sim.specs` +
    USD (CI-able, no sim needed).
 2. **Math unit tests** (no sim): synthetic-projection round-trips — project
