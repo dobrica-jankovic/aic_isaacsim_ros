@@ -288,7 +288,8 @@ Results obtained so far, on the default layout at `--camera-res 448`
 | Lock-on | during the transit, before the hover completes |
 | Standoff arrival | 0.6–0.8 mm of the commanded pose |
 | Descent | `insertion_fraction` 0 → **0.92**, driven by vision alone |
-| Clean seat (< 3 mm, held 0.5 s) | not yet — see below |
+| Deepest approach to the seat | ~5 mm, wedged laterally ~2.8 mm |
+| Clean seat (< 3 mm, held 0.5 s) | not reached — see §8 |
 
 The perception half of the design is validated: the estimator beats its
 ±0.5 mm budget by a comfortable margin and does so while the arm is moving.
@@ -373,11 +374,20 @@ localises the card to well under a millimetre and holds that estimate while
 the arm moves; the controller takes the plug from the home pose to
 `insertion_fraction ≈ 0.92` without ever reading a privileged topic.
 
-**The open item is the last few millimetres**, and it is a control problem,
-not a perception one. The plug and the opening are both 13.96 mm — zero
-nominal clearance — so seating is a press fit. A stiff position controller
-has only two behaviours there: back off (and stall short), or push through
-(and overshoot). Neither is seating. In priority order:
+**The open item is the last few millimetres.** Reproduced across runs: the
+plug descends the full 95 mm and then wedges roughly 5 mm short of the seat
+with a lateral deflection of ~2.8 mm (which is why `insertion_fraction`
+resets — it gates at 2 mm off-axis). The arithmetic explains it. The
+estimator's residual bias is ~0.7 mm (−0.35 mm x, +0.61 mm y); the plug and
+the opening are both 13.96 mm, i.e. **zero nominal clearance**. A
+sub-millimetre bias is therefore already larger than the clearance, so the
+plug contacts a wall on the way in and a stiff position controller converts
+that contact into binding rather than into the small lateral correction a
+compliant wrist would make.
+
+So the gap needs *either* another 3-4× of perception accuracy *or* — far
+more robustly, and what real cells do — lateral compliance during the last
+centimetre. In priority order:
 
 1. **Admittance control for the final 10 mm.** Command a small downward
    force rather than a position, and let lateral compliance find the hole.
