@@ -66,6 +66,24 @@ segments, 0.6/0.8/0.1 phase speed scales, 5 cm standoff, tip→TCP endpoint
 shift, 3 mm / 4° / 0.5 s success criteria. The wrench is tared at the standoff
 before each descent.
 
+## Measured behaviour
+
+Numbers from live runs against the sim at `--camera-res 448`, default
+(unrandomized) layout:
+
+| | |
+|---|---|
+| Card pose error vs `/aic/cheat/*` | 0.35 mm in x, 0.61 mm in y, yaw 0.12° |
+| Estimate scatter (`std_xy`) once locked | 0.14 mm |
+| Corners fused per estimate | 24 (both ports × 4 corners × 3 cameras) |
+| Fit residual (RMS) | 0.85 mm |
+| Standoff arrival error | 0.7–0.8 mm |
+| Lock-on | during the transit, before the hover completes |
+
+Perception locks on while the arm is still moving, so the controller never
+waits at the hover. Run `scripts/eval_perception.py` to reproduce the first
+rows; `scripts/run_campaign.sh` sweeps randomized layouts end to end.
+
 ## Safety rails
 
 - FK is cross-checked against the sim's `/tf` `gripper_tcp` every cycle
