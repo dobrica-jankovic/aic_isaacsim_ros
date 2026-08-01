@@ -12,7 +12,9 @@ the evaluation script.
 ## Run
 
 ```bash
-# 1. Sim (own terminal). 448 px cameras are the documented operating point.
+# 1. Sim (own terminal). --camera-res 448 is REQUIRED, not a preference: at
+#    the spec default of 224 px the openings are ~11 px wide, the detector
+#    finds nothing, and the controller waits in WAIT_ESTIMATE forever.
 source /opt/ros/jazzy/setup.bash
 ~/isaacsim-6.0/_build/linux-x86_64/release/python.sh run_sim.py --camera-res 448
 
@@ -84,6 +86,8 @@ Numbers from live runs against the sim at `--camera-res 448`, default
 | Fit residual (RMS) | 0.85 mm |
 | Standoff arrival error | 0.7–0.8 mm |
 | Lock-on | during the transit, before the hover completes |
+| End-to-end | **SEATED**, `insertion_fraction` 1.0, seat error 1.3 mm, 0 retries |
+| Home → SEATED | ~50 s wall (≈7 s of sim time) |
 
 Perception locks on while the arm is still moving, so the controller never
 waits at the hover. Run `scripts/eval_perception.py` to reproduce the first
