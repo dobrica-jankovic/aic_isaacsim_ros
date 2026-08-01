@@ -54,6 +54,7 @@ class PerceptionNode(Node):
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         self.camera_info: dict[str, np.ndarray] = {}
+        self._published_any = False
         self.pub_port = self.create_publisher(PoseWithCovarianceStamped, PORT_POSE_TOPIC, 10)
         self.pub_entrance = self.create_publisher(PoseStamped, ENTRANCE_POSE_TOPIC, 10)
         self.pub_seat = self.create_publisher(PoseStamped, SEAT_POSE_TOPIC, 10)
@@ -93,7 +94,20 @@ class PerceptionNode(Node):
         )
         estimate = self.estimator.add_observations(rects, stamp)
         if estimate is not None:
+            self._published_any = True
             self._publish(estimate, msg.header.stamp)
+        elif not self._published_any:
+            # Without this the controller just sits in WAIT_ESTIMATE forever
+            # with no stated reason. The usual cause is camera resolution: at
+            # the spec default of 224 px the openings are ~11 px wide and the
+            # detector finds nothing, so nothing is ever published.
+            self.get_logger().warn(
+                f"no port estimate yet ({name}: {len(rects)} opening candidates, "
+                f"{msg.width}x{msg.height} px). A pair of openings is required to "
+                "start a track; if this persists, the cameras are too coarse — "
+                "run the sim with --camera-res 448.",
+                throttle_duration_sec=5.0,
+            )
         if self.debug_overlay and name in self.pub_debug:
             self._publish_overlay(name, bgr, rects, K, cam_pose, msg.header)
 

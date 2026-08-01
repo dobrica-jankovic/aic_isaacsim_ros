@@ -287,18 +287,24 @@ Results obtained so far, on the default layout at `--camera-res 448`
 | Corners fused per estimate | 24 (2 ports × 4 corners × 3 cameras) |
 | Lock-on | during the transit, before the hover completes |
 | Standoff arrival | 0.6–0.8 mm of the commanded pose |
-| Descent | `insertion_fraction` 0 → **0.92**, driven by vision alone |
-| Deepest approach to the seat | ~5 mm, wedged laterally ~2.8 mm |
-| Clean seat (< 3 mm, held 0.5 s) | not reached — see §8 |
+| Descent | `insertion_fraction` 0 → **1.0**, driven by vision alone |
+| Final seat error | **1.3 mm** (threshold 3 mm), 0 retries |
+| Clean seat (< 3 mm, held 0.5 s) | **reached** — full sequence succeeds |
+| Home → SEATED | ~50 s wall at 448 px (≈7 s of sim time) |
 
-The perception half of the design is validated: the estimator beats its
-±0.5 mm budget by a comfortable margin and does so while the arm is moving.
-The remaining gap is the last few millimetres of *seating*, not sensing —
-the plug (13.96 mm) and the opening (13.96 mm) have zero nominal clearance,
-so the final travel is a press fit that a stiff position controller either
-stalls against or punches through. That is a force-control problem on a
-platform whose only force sensor is swamped by the cable (§7.6), and it is
-the honest boundary of what this design reaches.
+The design is validated end to end: the estimator beats its ±0.5 mm budget
+and does so while the arm is moving, and the plug seats with
+`insertion_fraction = 1.0` and no retries.
+
+**This only started working once the speed caps were corrected (§7.7), and
+the reason is worth recording.** Every earlier run stalled ~5 mm short and
+was diagnosed — by me — as a mechanical press-fit limit. It was not. Running
+the descent 4.5x slower than the task was designed for meant the tip crawled
+into first contact and sat there, which tripped the stall and force guards
+before the motion could complete. I then "fixed" those guards, which made the
+arm push harder into a nearly-finished insertion. **A control-rate bug
+presented as a geometry problem, and every measurement I took to explain it
+was real but pointed the wrong way.**
 
 1. **Spec drift**: `verify_specs.py` — package constants vs `aic_sim.specs` +
    USD (CI-able, no sim needed).
