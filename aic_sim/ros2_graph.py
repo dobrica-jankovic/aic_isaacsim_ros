@@ -21,13 +21,12 @@ The bridge only publishes while the timeline is playing.
 
 from __future__ import annotations
 
-import carb.settings
 import omni.kit.app
 from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
 from .cheat import add_cheat_topics, connect_cheat_publishers
 from .graph import GraphBuilder
-from .script_nodes import script_body
+from .script_nodes import allow_script_execution, script_body
 from .specs import (
     AIC_CAMERA_LENS,
     AIC_NIC_PORT_0_GOAL,
@@ -77,10 +76,7 @@ def build_bridge(
     robot_root = asset_root_prim_path(stage, robot_slot, robot.usd.root_prim)
     arm = robot.joint_group(ARM_JOINT_GROUP)
 
-    # ScriptNodes are opt-in by default and the opt-in prompt is a UI dialog,
-    # which never resolves headless.
-    carb.settings.get_settings().set("/app/omni.graph.scriptnode/enable_opt_in", False)
-
+    allow_script_execution()
     _apply_actuator_gains(stage, robot_root, robot)
 
     builder = GraphBuilder(stage, graph_path)

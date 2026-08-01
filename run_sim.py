@@ -59,12 +59,18 @@ def main() -> None:
     enable_extension("isaacsim.ros2.bridge")
     app.update()
 
-    from aic_sim.ros2_graph import build_bridge, build_report
+    from aic_sim.ros2_graph import DEFAULT_GRAPH_PATH, build_bridge, build_report
+    from aic_sim.script_nodes import allow_script_execution
     from aic_sim.specs import AIC_PORT_INSERTION_LAYOUT
     from aic_sim.stage import build_scene, describe_scene
 
+    # Needed whether the graph is built here or arrives with a saved stage:
+    # without it the ScriptNodes wait on a UI prompt and compute nothing.
+    allow_script_execution()
+
     context = omni.usd.get_context()
     if args.stage:
+        print(f"opening stage: {args.stage}")
         context.open_stage(args.stage)
     else:
         context.new_stage()
@@ -87,6 +93,11 @@ def main() -> None:
     if not args.no_ros and not args.stage:
         builder = build_bridge(context.get_stage(), AIC_PORT_INSERTION_LAYOUT)
         print(build_report(builder))
+    elif args.stage:
+        # A reloaded graph fails quietly rather than loudly, so say what it did.
+        for _ in range(60):
+            app.update()
+        print(_reloaded_graph_report(context.get_stage(), DEFAULT_GRAPH_PATH))
 
     if args.save:
         context.save_stage()
@@ -98,6 +109,37 @@ def main() -> None:
         app.update()
         frames += 1
     app.close()
+
+
+def _reloaded_graph_report(stage, graph_path: str) -> str:
+    """Summarise a graph that came in with a saved stage.
+
+    The save/reload failure mode is silent: inputs quietly fall back to OGN
+    defaults, so the bridge comes up publishing ``/rgb`` instead of failing.
+    Listing the topics the reopened graph actually asks for is what makes that
+    visible without a ROS shell.
+    """
+
+    import omni.graph.core as og
+
+    if not stage.GetPrimAtPath(graph_path):
+        return f"no graph at {graph_path}"
+
+    graph = og.Controller.graph(graph_path)
+    topics, errors = [], []
+    for node in graph.get_nodes():
+        name = node.get_prim_path().split("/")[-1]
+        topic = stage.GetPrimAtPath(node.get_prim_path()).GetAttribute("inputs:topicName")
+        if topic and topic.Get():
+            topics.append(str(topic.Get()))
+        messages = list(node.get_compute_messages(og.Severity.ERROR))
+        if messages:
+            errors.append(f"  ERROR {name}: {messages[0][:160]}")
+
+    lines = [f"reloaded graph: {len(list(graph.get_nodes()))} nodes"]
+    lines += [f"  topic {topic}" for topic in sorted(topics)]
+    lines += errors
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

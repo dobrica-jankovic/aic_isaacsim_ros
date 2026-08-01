@@ -27,6 +27,20 @@ _BODY_DIR = Path(__file__).resolve().parent
 _CONFIG_PLACEHOLDER = "CONFIG = {}"
 
 
+def allow_script_execution() -> None:
+    """Let ScriptNodes run without the opt-in prompt.
+
+    Executing a ScriptNode is opt-in, and the prompt is a UI dialog that never
+    resolves headless -- the nodes then sit there computing nothing. Call this
+    before *any* graph containing ScriptNodes runs, which means when opening a
+    saved stage as well as when building one.
+    """
+
+    import carb.settings
+
+    carb.settings.get_settings().set("/app/omni.graph.scriptnode/enable_opt_in", False)
+
+
 def script_body(name: str, **config: object) -> str:
     """Return the body of ``<name>.py`` with its ``CONFIG`` filled in."""
 
@@ -36,4 +50,4 @@ def script_body(name: str, **config: object) -> str:
     return source.replace(_CONFIG_PLACEHOLDER, f"CONFIG = {config!r}", 1)
 
 
-__all__ = ["script_body"]
+__all__ = ["allow_script_execution", "script_body"]

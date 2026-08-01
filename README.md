@@ -42,7 +42,7 @@ ros2 topic pub /joint_command sensor_msgs/msg/JointState \
 ```
 
 `scripts/move_arm.py` ramps to a joint target over `/joint_command` rather than
-stepping to it.
+stepping to it; `--home` returns to the spec's default arm pose.
 
 Useful flags: `--headless`, `--no-ros`, `--save <path.usd>` to write the built
 stage out, `--stage <path.usd>` to open one instead of rebuilding.
